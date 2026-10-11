@@ -57,7 +57,7 @@ static void rainDraw(bool dim);           // render the rain into the framebuffe
 
 static int menuSel = 0, listSel = 0, editSel = 0, setSel = 0, sessSel = 0, hkSel = 0;
 static uint32_t savedFlash = 0;   // timestamp of last settings save (for toast)
-static constexpr uint32_t MENU_IDLE_MS = 30000;
+static constexpr uint32_t MENU_IDLE_MS = 15000;
 static uint32_t menuLastInput = 0;
 static bool menuScreensaver = false;
 
@@ -643,11 +643,15 @@ static void drawTextInput() {
 
 static int     rainHead[RAIN_COLS];          // head row per column (can be < 0)
 static uint8_t rainCell[RAIN_COLS][RAIN_ROWS];// glyph index per cell
+static uint8_t rainSpeed[RAIN_COLS];         // frames between falls (1-4)
+static uint8_t rainPhase[RAIN_COLS];         // independent column pacing
 static bool    rainInit = false;
 
 static void rainSetup() {
   for (int c = 0; c < RAIN_COLS; c++) {
     rainHead[c] = random(-RAIN_ROWS, 0);
+    rainSpeed[c] = random(1, 5);
+    rainPhase[c] = random(0, rainSpeed[c]);
     for (int r = 0; r < RAIN_ROWS; r++) rainCell[c][r] = random(MTX_GLYPH_N);
   }
   rainInit = true;
@@ -655,12 +659,18 @@ static void rainSetup() {
 
 // Advance the streams one step and mutate a few glyphs so they shimmer.
 static void rainStep() {
+  if (!rainInit) rainSetup();
   for (int c = 0; c < RAIN_COLS; c++) {
-    if (++rainHead[c] - 14 > RAIN_ROWS) rainHead[c] = random(-RAIN_ROWS, -2);
+    if (++rainPhase[c] < rainSpeed[c]) continue;
+    rainPhase[c] = 0;
+    if (++rainHead[c] - 22 > RAIN_ROWS) {
+      rainHead[c] = random(-RAIN_ROWS, -2);
+      rainSpeed[c] = random(1, 5); // vary speed when a stream restarts
+    }
     if (rainHead[c] >= 0 && rainHead[c] < RAIN_ROWS)
       rainCell[c][rainHead[c]] = random(MTX_GLYPH_N);
   }
-  for (int n = 0; n < 12; n++)               // random shimmer
+  for (int n = 0; n < 9; n++)  // occasional glyph flicker
     rainCell[random(RAIN_COLS)][random(RAIN_ROWS)] = random(MTX_GLYPH_N);
 }
 
@@ -670,13 +680,14 @@ static void rainDraw(bool dim) {
   if (!rainInit) rainSetup();
   for (int c = 0; c < RAIN_COLS; c++) {
     int x = c * 8;
-    for (int k = 0; k < 14; k++) {           // fading tail behind each head
+    for (int k = 0; k < 22; k++) {           // longer fading digital-rain trails
       int r = rainHead[c] - k;
       if (r < 0 || r >= RAIN_ROWS) continue;
       uint16_t col;
-      if (dim) col = (k == 0) ? 0x0560 : (k < 5) ? 0x0400 : (k < 9) ? 0x0200 : 0x0140;
-      else     col = (k == 0) ? TFT_WHITE : (k < 3) ? 0x07E0 : (k < 6) ? 0x0560
-                   : (k < 10) ? 0x0400 : 0x0200;
+      if (dim) col = (k == 0) ? 0x0560 : (k < 5) ? 0x0400 : (k < 10) ? 0x0200
+                       : (k < 16) ? 0x0140 : 0x0080;
+      else     col = (k == 0) ? 0xDFFF : (k < 3) ? 0x07E0 : (k < 7) ? 0x05A0
+                       : (k < 12) ? 0x0340 : (k < 17) ? 0x01C0 : 0x0080;
       tft.drawBitmap(x, r * 9, mtxGlyphs[rainCell[c][r]], 8, 8, col);
     }
   }
