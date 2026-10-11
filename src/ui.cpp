@@ -14,6 +14,7 @@
 #include "fsx.h"
 #include "touch.h"
 #include "matrix_glyphs.h"
+#include "usb_storage.h"
 
 // The real panel, plus the off-screen framebuffer everything draws into. `tft`
 // is a full-screen sprite (PSRAM) named to match the rest of the code, so all
@@ -57,6 +58,7 @@ static void rainDraw(bool dim);           // render the rain into the framebuffe
 
 static int menuSel = 0, listSel = 0, editSel = 0, setSel = 0, sessSel = 0, hkSel = 0;
 static uint32_t savedFlash = 0;   // timestamp of last settings save (for toast)
+static String settingsImportMsg;
 static constexpr uint32_t MENU_IDLE_MS = 15000;
 static uint32_t menuLastInput = 0;
 static bool menuScreensaver = false;
@@ -190,12 +192,12 @@ static const char* kSess[] = {
 };
 static const int kSessN = 9;
 
-static const char* kMenu[] = {"Connections", "AI Assistant", "WiFi", "Settings", "About"};
+static const char* kMenu[] = {"Connections", "AI Assistant", "WiFi", "Settings", "About", "USB SD card"};
 static const char* kMenuSub[] = {
   "Saved SSH hosts", "Ask Claude on-device", "Networks & signal",
-  "Keys, API & model", "Version & credits"
+  "Keys, API & model", "Version & credits", "Restart to share the whole SD card"
 };
-static const int   kMenuN  = 5;
+static const int   kMenuN  = 6;
 
 // ---------------------------------------------------------------------------
 //  Small drawing helpers
@@ -329,10 +331,11 @@ static void drawMainMenu() {
   }
   rainDraw(true);                       // dim katakana rain behind the menu
   header("NeoDeck");
-  static const uint16_t col[] = {C_ACCENT, C_CYAN, C_BLUE, C_PURPLE, C_ACCENT_D};
+  static const uint16_t col[] = {C_ACCENT, C_CYAN, C_BLUE, C_PURPLE, C_ACCENT_D, C_CYAN};
   const int y0 = HDR_H + 6, rh = 37, ch = rh - 5;
-  for (int i = 0; i < kMenuN; i++) {
-    int y = y0 + i * rh;
+  const int off = max(0, menuSel - 4);
+  for (int i = off; i < kMenuN && i < off + 5; i++) {
+    int y = y0 + (i - off) * rh;
     bool s = (i == menuSel);
     // ~50% translucent card over the rain; selected rows are a touch stronger.
     alphaRoundRect(8, y, 304, ch, 7, s ? C_PANEL2 : C_PANEL, s ? 165 : 120);
@@ -345,6 +348,7 @@ static void drawMainMenu() {
       case 2: Icons::wifi(26, iy, wifiBars(), col[i]); break;
       case 3: Icons::gear(26, iy, col[i]); break;
       case 4: Icons::info(26, iy, col[i]); break;
+      case 5: Icons::usb(26, iy, col[i]); break;
     }
     // Transparent text background so the faded rain still shows around glyphs.
     fontUi();
@@ -851,11 +855,13 @@ static void drawSettings() {
                                : dots(min((int)gConfig.anthropicKey.length(), 12))),
     "AI Model: "  + gConfig.aiModel,
     "Save & reconnect WiFi",
+    "Import WiFi/API from flash",
   };
-  static const uint16_t ic[] = {C_BLUE, C_BLUE, C_PURPLE, C_CYAN, C_ACCENT};
+  static const uint16_t ic[] = {C_BLUE, C_BLUE, C_PURPLE, C_CYAN, C_ACCENT, C_ACCENT};
   const int y0 = HDR_H + 6, rh = 30, ch = rh - 5;
-  for (int i = 0; i < 5; i++) {
-    int y = y0 + i * rh;
+  const int off = max(0, setSel - 4);
+  for (int i = off; i < 6 && i < off + 5; i++) {
+    int y = y0 + (i - off) * rh;
     bool s = (i == setSel);
     tft.fillRoundRect(8, y, 304, ch, 5, s ? C_PANEL2 : C_PANEL);
     tft.fillRect(8, y, 4, ch, ic[i]);
@@ -894,6 +900,11 @@ static void drawSettings() {
 
   // Footer: peek hint + storage + transient "saved" toast.
   fontSmall();
+  if (!setReveal && settingsImportMsg.length()) {
+    tft.fillRect(6, 214, 308, 10, C_BG);
+    tft.setTextColor(C_ACCENT, C_BG);
+    tft.drawString(settingsImportMsg, 8, 215);
+  }
   tft.setTextColor(setReveal ? C_WARN : C_MUTED, C_BG);
   tft.drawString(setReveal ? "right = hide" : "right = peek secrets", 8, 230);
   tft.setTextColor(C_MUTED, C_BG);
@@ -1109,6 +1120,12 @@ void begin() {
   analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);
   updateBattery(true);
   tft_device.init();
+  // T-Deck's pulse-controlled backlight driver retains a brightness level
+  // across warm resets. A >=3 ms low pulse resets it; high selects full light.
+  digitalWrite(TFT_BL, LOW);
+  delay(3);
+  digitalWrite(TFT_BL, HIGH);
+  delayMicroseconds(30);
   tft_device.setRotation(1);          // landscape 320x240
   tft_device.fillScreen(C_BG);
 
@@ -1133,6 +1150,47 @@ void begin() {
 
 // Push the finished off-screen frame to the panel in one shot.
 static void present() { if (fbReady) tft.pushSprite(0, 0); }
+
+void usbStorageStatus(const char* title, const char* line1, const char* line2) {
+  // This static screen is only drawn while USB has no medium available. Draw
+  // directly, so transfer/error status also works without a PSRAM framebuffer.
+  // Reinitialize the panel after the SD driver's SPI setup, before USB I/O.
+  tft_device.init();
+  tft_device.setRotation(1);
+  tft_device.fillScreen(C_BG);
+  // A frozen Matrix backdrop: draw once before publishing the USB medium.
+  // Animation would compete with SD transfers on the shared SPI bus.
+  for (int c = 0; c < RAIN_COLS; ++c) {
+    const int head = random(RAIN_ROWS);
+    for (int k = 0; k < 22; ++k) {
+      const int row = head - k;
+      if (row < 0) break;
+      const uint16_t color = k == 0 ? 0x0560 : k < 5 ? 0x0340
+                               : k < 12 ? 0x0140 : 0x0080;
+      tft_device.drawBitmap(c * 8, row * 9, mtxGlyphs[random(MTX_GLYPH_N)],
+                            8, 8, color);
+    }
+  }
+  const int bx = 12, by = 34, bw = 296, bh = 172;
+  tft_device.fillRect(bx, by, bw, bh, C_BG);
+  tft_device.drawRect(bx, by, bw, bh, C_ACCENT);
+  tft_device.drawRect(bx + 2, by + 2, bw - 4, bh - 4, C_ACCENT_D);
+  tft_device.setTextDatum(TL_DATUM);
+  tft_device.setFreeFont(&FreeMonoBold12pt7b);
+  tft_device.setTextColor(C_ACCENT, C_BG);
+  tft_device.drawString("NeoDeck", (320 - tft_device.textWidth("NeoDeck")) / 2, 45);
+  tft_device.setTextFont(2);
+  tft_device.setTextColor(C_TEXT, C_BG);
+  tft_device.drawString(title, (320 - tft_device.textWidth(title)) / 2, 80);
+  tft_device.drawFastHLine(30, 106, 260, C_ACCENT_D);
+  tft_device.setTextFont(1);
+  tft_device.drawString(line1, (320 - tft_device.textWidth(line1)) / 2, 120);
+  tft_device.drawString(line2, (320 - tft_device.textWidth(line2)) / 2, 138);
+  tft_device.setTextColor(C_MUTED, C_BG);
+  tft_device.drawString("Whole microSD card shared over USB", 61, 165);
+  tft_device.setTextColor(C_WARN, C_BG);
+  tft_device.drawString("Includes saved settings and secrets", 58, 183);
+}
 
 void render() {
   if (!dirty && screen != Screen::TERMINAL) return;
@@ -1224,6 +1282,13 @@ static void handleMenu(const InputEvent& ev) {
       case 2: wifiMsg = ""; screen = Screen::WIFI; startWifiScan(); break;
       case 3: screen = Screen::SETTINGS; setSel = 0; break;
       case 4: screen = Screen::ABOUT; break;
+      case 5:
+        if (!UsbStorage::requestBoot()) {
+          usbStorageStatus("Cannot enter USB mode", "Could not save the boot request.",
+                           "Press a direction to return.");
+          return;
+        }
+        break;
     }
     dirty = true;
   }
@@ -1367,8 +1432,8 @@ static void handleAiResult(const InputEvent& ev) {
 }
 
 static void handleSettings(const InputEvent& ev) {
-  if (ev.type == EvType::UP)    { setSel = (setSel + 4) % 5; dirty = true; }
-  if (ev.type == EvType::DOWN)  { setSel = (setSel + 1) % 5; dirty = true; }
+  if (ev.type == EvType::UP)    { setSel = (setSel + 5) % 6; dirty = needClear = true; }
+  if (ev.type == EvType::DOWN)  { setSel = (setSel + 1) % 6; dirty = needClear = true; }
   if (ev.type == EvType::RIGHT) { setReveal = !setReveal;    dirty = true; }   // peek secrets
   if (ev.type == EvType::LEFT || ev.ch == '`') { setReveal = false; screen = Screen::MENU; dirty = true; }
   if (ev.type == EvType::SELECT || ev.ch == '\r') {
@@ -1378,6 +1443,11 @@ static void handleSettings(const InputEvent& ev) {
       case 2: startEdit("API Key",   gConfig.anthropicKey, true, Screen::SETTINGS, [](const String& v){ gConfig.anthropicKey = v; savedFlash = Storage::save() ? millis() : 0; }); break;
       case 3: startEdit("AI Model",  gConfig.aiModel, false, Screen::SETTINGS, [](const String& v){ gConfig.aiModel = v; savedFlash = Storage::save() ? millis() : 0; }); break;
       case 4: WifiMgr::saveNetwork(gConfig.wifiSsid, gConfig.wifiPass); savedFlash = Storage::save() ? millis() : 0; WifiMgr::connect(); break;
+      case 5:
+        setReveal = false;
+        settingsImportMsg = Storage::importFlashCredentials();
+        needClear = true;
+        break;
     }
     dirty = true;
   }
@@ -1489,8 +1559,9 @@ void touch(int x, int y) {
   switch (screen) {
     case Screen::MENU: {
       const int y0 = HDR_H + 6, rh = 37, ch = rh - 5;
-      for (int i = 0; i < kMenuN; i++) {
-        int ry = y0 + i * rh;
+      const int off = max(0, menuSel - 4);
+      for (int i = off; i < kMenuN && i < off + 5; i++) {
+        int ry = y0 + (i - off) * rh;
         if (y >= ry && y < ry + ch) { menuSel = i; dirty = true; handleMenu({EvType::SELECT, 0}); break; }
       }
       break;
@@ -1521,8 +1592,9 @@ void touch(int x, int y) {
     }
     case Screen::SETTINGS: {
       const int y0 = HDR_H + 6, rh = 30, ch = rh - 5;
-      for (int i = 0; i < 5; i++) {
-        int ry = y0 + i * rh;
+      const int off = max(0, setSel - 4);
+      for (int i = off; i < 6 && i < off + 5; i++) {
+        int ry = y0 + (i - off) * rh;
         if (y >= ry && y < ry + ch) { setSel = i; dirty = true; handleSettings({EvType::SELECT, 0}); break; }
       }
       break;

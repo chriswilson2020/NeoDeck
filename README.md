@@ -59,6 +59,15 @@ menu and runs NeoDeck as an app:
 NeoDeck stores its config on the **SD card** (`/deckssh/config.json`) when one is
 present, so settings survive launching in and out.
 
+If WiFi credentials or the API key disappear after inserting an SD card, open
+**Settings**, scroll past **Save & reconnect WiFi**, and select **Import WiFi/API
+from flash**. This reads the internal config without formatting internal storage,
+adds missing saved networks (up to ten), and fills an empty API key. Existing SD
+credentials take priority. It leaves SSH profiles and other settings unchanged,
+keeps the internal copy, and backs up an existing SD config alongside it as
+`config.json.before-import-N`. Then select **Save & reconnect WiFi** or restart.
+The SD config and its backups contain credentials; keep them private.
+
 ### Option C — Build from source (PlatformIO)
 
 ```bash
@@ -85,6 +94,43 @@ esptool.py --chip esp32s3 merge_bin -o docs/firmware/NeoDeck-merged.bin \
 3. Select it to open the terminal. **Trackball click** = Session menu.
 4. Optional: set an Anthropic API key in **Settings** for the AI assistant. In
    Settings, trackball **right** peeks the stored secrets.
+
+## USB SD card transfer
+
+Choose **USB SD card** at the bottom of the main menu (scroll down past About).
+NeoDeck restarts into a dedicated transfer mode and exposes the entire
+microSD card over USB-C, including `/deckssh` and any stored credentials or keys.
+Use a data-capable USB cable. No extra USB hardware is required.
+Close serial monitors before entering transfer mode: concurrent CDC monitoring
+was associated with macOS USB storage resets on the pinned USB stack. Transfer
+mode deliberately sends no periodic serial diagnostics.
+
+SSH, WiFi, and application filesystem access are stopped during transfer mode.
+The screen shows a frozen Matrix backdrop and a green NeoDeck status box. It
+stays static because the display and SD card share SPI; drawing finishes before
+the USB medium becomes available. After copying
+files, **eject the drive on your computer**, then press Enter or click the
+trackball to restart NeoDeck and reload its configuration. If the computer sends
+a USB eject command, the screen confirms that the card was ejected. A USB suspend
+event is not treated as an eject. Do not remove power during a write.
+
+Transfer mode uses the SD block driver without mounting a local filesystem;
+the computer interprets the card's partition table and filesystem. NeoDeck's
+normal application still requires FAT32 to read settings from the card.
+An absent/unresponsive SD card shows an error; transfer mode never formats a card
+or exports internal LittleFS. Normal mode exposes an empty USB card reader along
+with CDC serial; the medium is only made available in transfer mode. The build
+uses Arduino USB OTG mode (`ARDUINO_USB_MODE=0`). USB serial may have a different
+port name after flashing. If automatic upload stops working, hold the BOOT /
+trackball button while resetting or powering on, then retry using the ROM port.
+
+The sector adapter can be checked on the host without hardware:
+
+```bash
+c++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+  test/msc_blocks_test.cpp -o /tmp/neodeck-msc-test
+/tmp/neodeck-msc-test
+```
 
 ## Controls
 

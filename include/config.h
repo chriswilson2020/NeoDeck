@@ -36,6 +36,8 @@
 
 // SD card + shared SPI bus (same bus as the TFT)
 #define BOARD_SD_CS    39
+#define BOARD_TFT_CS   12
+#define BOARD_RADIO_CS 9
 #define BOARD_SPI_SCK  40
 #define BOARD_SPI_MISO 38
 #define BOARD_SPI_MOSI 41

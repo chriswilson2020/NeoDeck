@@ -9,6 +9,7 @@ namespace Icons {
   void key(int x, int y, uint16_t col);
   void terminal(int x, int y, uint16_t col);
   void gear(int x, int y, uint16_t col);
+  void usb(int x, int y, uint16_t col);
   void robot(int x, int y, uint16_t col);           // AI
   void plus(int x, int y, uint16_t col);
   void server(int x, int y, uint16_t col);

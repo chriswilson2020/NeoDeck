@@ -41,6 +41,19 @@ void gear(int x, int y, uint16_t col) {
   tft.fillRect(x + 12, cy - 1, 3, 2, col);
 }
 
+void usb(int x, int y, uint16_t col) {
+  // USB trident: arrow, circle and square, within the 16x16 icon box.
+  tft.drawFastVLine(x + 8, y + 3, 11, col);
+  tft.fillTriangle(x + 5, y + 3, x + 11, y + 3, x + 8, y, col);
+  tft.fillCircle(x + 8, y + 14, 1, col);
+  tft.drawLine(x + 8, y + 11, x + 3, y + 8, col);
+  tft.drawFastVLine(x + 3, y + 6, 3, col);
+  tft.fillCircle(x + 3, y + 5, 2, col);
+  tft.drawLine(x + 8, y + 9, x + 13, y + 6, col);
+  tft.drawFastVLine(x + 13, y + 3, 4, col);
+  tft.fillRect(x + 11, y + 1, 4, 4, col);
+}
+
 void robot(int x, int y, uint16_t col) {
   tft.drawRoundRect(x + 2, y + 4, 12, 10, 2, col);
   tft.fillRect(x + 5, y + 7, 2, 2, col);           // eyes

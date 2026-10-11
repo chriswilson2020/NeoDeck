@@ -4,6 +4,7 @@
 // filesystem, network, SSH engine, UI.
 
 #include <Arduino.h>
+#include <SPI.h>
 #include "config.h"
 #include "fsx.h"
 #include "storage.h"
@@ -12,6 +13,9 @@
 #include "ssh_session.h"
 #include "touch.h"
 #include "ui.h"
+#include "usb_storage.h"
+
+static bool usbStorageBoot = false;
 
 void setup() {
   Serial.begin(115200);
@@ -19,6 +23,14 @@ void setup() {
   // 1. Power the peripheral rail (display, keyboard, SD all hang off this).
   pinMode(BOARD_POWERON, OUTPUT);
   digitalWrite(BOARD_POWERON, HIGH);
+  // LilyGO's shared-bus initialization: no peripheral may drive MISO until
+  // selected. The unused LoRa radio must be deselected too.
+  for (int cs : {BOARD_SD_CS, BOARD_TFT_CS, BOARD_RADIO_CS}) {
+    digitalWrite(cs, HIGH);
+    pinMode(cs, OUTPUT);
+  }
+  pinMode(BOARD_SPI_MISO, INPUT_PULLUP);
+  SPI.begin(BOARD_SPI_SCK, BOARD_SPI_MISO, BOARD_SPI_MOSI);
   delay(200);
 
   Serial.println("\n" APP_NAME " v" APP_VERSION " booting…");
@@ -33,6 +45,12 @@ void setup() {
   // 3. Display + UI (shows splash immediately)
   UI::begin();
 
+  usbStorageBoot = UsbStorage::consumeBootRequest();
+  if (usbStorageBoot) {
+    UsbStorage::begin();
+    return;
+  }
+
   // 4. Filesystem (SD preferred, LittleFS fallback) — after TFT so they share
   //    the SPI bus cleanly — then load config.
   fsx::begin();
@@ -46,6 +64,11 @@ void setup() {
 }
 
 void loop() {
+  if (usbStorageBoot) {
+    UsbStorage::tick(gInput.poll());
+    delay(4);
+    return;
+  }
   // Drain one input event per loop and dispatch it.
   InputEvent ev = gInput.poll();
   if (ev.type != EvType::NONE) UI::handle(ev);

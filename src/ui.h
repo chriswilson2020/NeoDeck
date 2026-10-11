@@ -8,4 +8,5 @@ namespace UI {
   void touch(int x, int y);      // a tap at screen coords (from the GT911)
   void tick();                   // drain SSH output, update terminal, animations
   void render();                 // redraw the current screen if dirty
+  void usbStorageStatus(const char* title, const char* line1, const char* line2);
 }
