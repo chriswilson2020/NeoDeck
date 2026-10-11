@@ -1,5 +1,10 @@
 # NeoDeck
 
+**v0.8.0 — Chris Wilson edition.** Derived from
+[NeoDeck v0.7.0 by Justyn Roberts](https://github.com/justynroberts/NeoDeck),
+with continued development in [Chris Wilson's fork](https://github.com/chriswilson2020/NeoDeck),
+including USB SD mass storage, flash-to-SD credentials import, and battery status.
+
 A full-featured **SSH client firmware** for the LilyGo **T-Deck Plus** (ESP32-S3 +
 BlackBerry-style keyboard + trackball + 320×240 ST7789). Stored connection
 profiles, a real cursor-addressable terminal over [libssh](https://www.libssh.org/),

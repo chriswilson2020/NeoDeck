@@ -1090,21 +1090,23 @@ static void drawAbout() {
   tft.drawString("NeoDeck", 14, HDR_H + 10);
   fontSmall();
   tft.setTextColor(C_MUTED, C_BG);
-  tft.drawString("v" APP_VERSION "  ·  LilyGo T-Deck Plus", 14, HDR_H + 36);
+  tft.drawString("v" APP_VERSION "  /  Chris Wilson edition", 14, HDR_H + 36);
 
-  struct { const char* k; const char* v; uint16_t c; } rows[] = {
-    {"SSH",    "libssh · password + key auth", C_ACCENT},
-    {"Crypto", "host-key verify · pinned TLS", C_CYAN},
-    {"AI",     "Claude on-device assistant",   C_PURPLE},
-    {"Input",  "keyboard · trackball · touch", C_WARN},
-  };
-  int y = HDR_H + 56;
-  for (auto& r : rows) {
-    tft.fillRect(14, y + 4, 4, 12, r.c);
-    fontUi();  tft.setTextColor(C_TEXT, C_BG); tft.drawString(r.k, 26, y);
-    fontSmall(); tft.setTextColor(C_MUTED, C_BG); tft.drawString(r.v, 92, y + 3);
-    y += 22;
-  }
+  const int by = HDR_H + 54;
+  tft.fillRect(12, by, 296, 84, C_PANEL);
+  tft.drawRect(12, by, 296, 84, C_ACCENT_D);
+  tft.setTextColor(C_TEXT, C_PANEL);
+  tft.drawString("Derived from NeoDeck v0.7.0", 22, by + 10);
+  tft.setTextColor(C_MUTED, C_PANEL);
+  tft.drawString("Original project by Justyn Roberts", 22, by + 27);
+  tft.setTextColor(C_TEXT, C_PANEL);
+  tft.drawString("Continued development by Chris Wilson", 22, by + 44);
+  tft.setTextColor(C_ACCENT, C_PANEL);
+  tft.drawString("github.com/chriswilson2020/NeoDeck", 22, by + 63);
+  tft.setTextColor(C_TEXT, C_BG);
+  tft.drawString("SSH / AI / WiFi / USB SD storage", 14, 179);
+  tft.setTextColor(C_MUTED, C_BG);
+  tft.drawString("LilyGo T-Deck Plus / ESP32-S3", 14, 195);
   fontSmall();
   tft.setTextColor(Touch::present() ? C_ACCENT : C_WARN, C_BG);
   tft.drawString(Touch::present() ? "touch: ready" : "touch: not detected", 14, 214);

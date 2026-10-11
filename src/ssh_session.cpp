@@ -5,6 +5,7 @@
 #include <libssh/libssh.h>
 #include "keys.h"
 #include "fsx.h"
+#include "host_keys.h"
 
 SshSession gSsh;
 
@@ -105,7 +106,11 @@ void SshSession::run() {
       ssh_key_free(srv);
     }
 
-    enum ssh_known_hosts_e known = ssh_session_is_known_server(session);
+    enum ssh_known_hosts_e known = HostKeys::check(session);
+    if (known == SSH_KNOWN_HOSTS_ERROR) {
+      fail("cannot read saved host keys");
+      goto cleanup;
+    }
     if (known != SSH_KNOWN_HOSTS_OK) {
       // Unknown or changed: block until the UI accepts or rejects.
       hostKeyChanged_  = (known == SSH_KNOWN_HOSTS_CHANGED || known == SSH_KNOWN_HOSTS_OTHER);
@@ -114,7 +119,10 @@ void SshSession::run() {
       state_ = State::HOSTKEY;
       while (hostKeyDecision_ == 0 && !wantStop_) vTaskDelay(pdMS_TO_TICKS(50));
       if (wantStop_ || hostKeyDecision_ == 2) { fail("host key rejected"); goto cleanup; }
-      ssh_session_update_known_hosts(session);   // remember it for next time
+      if (!HostKeys::remember(session)) {
+        fail("host key could not be saved; check storage");
+        goto cleanup;
+      }
     }
   }
 
