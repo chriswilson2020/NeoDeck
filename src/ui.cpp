@@ -57,6 +57,9 @@ static void rainDraw(bool dim);           // render the rain into the framebuffe
 
 static int menuSel = 0, listSel = 0, editSel = 0, setSel = 0, sessSel = 0, hkSel = 0;
 static uint32_t savedFlash = 0;   // timestamp of last settings save (for toast)
+static constexpr uint32_t MENU_IDLE_MS = 30000;
+static uint32_t menuLastInput = 0;
+static bool menuScreensaver = false;
 
 // Reveal toggles for masked secrets (peek at WiFi / API keys).
 static bool setReveal = false;    // Settings screen: show real values
@@ -262,6 +265,10 @@ static std::vector<String> aiWrap(const String& input, int cols) {
 static void drawMainMenu() {
   tft.fillSprite(C_BG);
   rainStep();
+  if (menuScreensaver) {
+    rainDraw(false);                    // full-screen Matrix rain, no menu/header
+    return;
+  }
   rainDraw(true);                       // dim katakana rain behind the menu
   header("NeoDeck");
   static const uint16_t col[] = {C_ACCENT, C_CYAN, C_BLUE, C_PURPLE, C_ACCENT_D};
@@ -1057,6 +1064,11 @@ static void present() { if (fbReady) tft.pushSprite(0, 0); }
 
 void render() {
   if (!dirty && screen != Screen::TERMINAL) return;
+  // The idle timer applies only on the home menu, and starts afresh on return.
+  if (screen == Screen::MENU && lastDrawn != Screen::MENU) {
+    menuLastInput = millis();
+    menuScreensaver = false;
+  }
   // A frame is "fresh" (warrants a full body wipe) only when the screen changed
   // or something explicitly asked for a clear; otherwise we repaint in place.
   fresh = (screen != lastDrawn) || needClear;
@@ -1357,6 +1369,14 @@ static void handleTextInput(const InputEvent& ev) {
 
 void handle(const InputEvent& ev) {
   if (ev.type == EvType::NONE) return;
+  if (screen == Screen::MENU) {
+    menuLastInput = millis();
+    if (menuScreensaver) {
+      menuScreensaver = false;
+      dirty = true;
+      return; // Wake only: don't accidentally select a menu item.
+    }
+  }
   switch (screen) {
     case Screen::SPLASH:       break;
     case Screen::MENU:         handleMenu(ev); break;
@@ -1380,6 +1400,14 @@ void handle(const InputEvent& ev) {
 //  reuse the existing keyboard/trackball handlers by synthesizing events.
 // ---------------------------------------------------------------------------
 void touch(int x, int y) {
+  if (screen == Screen::MENU) {
+    menuLastInput = millis();
+    if (menuScreensaver) {
+      menuScreensaver = false;
+      dirty = true;
+      return; // First touch only restores the menu.
+    }
+  }
   // Left side of the header = universal "back" (not in the terminal, where the
   // trackball arrows belong to the shell).
   if (y < HDR_H && x < 90 && screen != Screen::TERMINAL) {
@@ -1467,6 +1495,10 @@ void tick() {
   }
   // Animate the menu's rain background at ~14 fps.
   if (screen == Screen::MENU) {
+    if (!menuScreensaver && millis() - menuLastInput >= MENU_IDLE_MS) {
+      menuScreensaver = true;
+      dirty = true;
+    }
     static uint32_t lastRain = 0;
     if (millis() - lastRain > 70) { lastRain = millis(); dirty = true; }
   }
