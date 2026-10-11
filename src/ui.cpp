@@ -74,9 +74,18 @@ static void updateBattery(bool force = false) {
   if (!force && now - batteryLastRead < 30000) return;
   batteryLastRead = now;
   uint32_t totalMv = 0;
-  for (int i = 0; i < 12; ++i) totalMv += analogReadMilliVolts(BATTERY_ADC_PIN);
+  uint32_t totalRaw = 0;
+  for (int i = 0; i < 12; ++i) {
+    totalRaw += analogRead(BATTERY_ADC_PIN);
+    totalMv += analogReadMilliVolts(BATTERY_ADC_PIN);
+  }
   batteryMv = (int)((totalMv / 12) * 2); // 100k/100k battery divider
   batteryValid = batteryMv >= 2800 && batteryMv <= 4400;
+  // Report invalid measurements too; samples repeat every 30 seconds.
+  Serial.printf("[bat] gpio=%d raw=%lu adc=%lumV vbat=%dmV valid=%s\n",
+                BATTERY_ADC_PIN, (unsigned long)(totalRaw / 12),
+                (unsigned long)(totalMv / 12), batteryMv,
+                batteryValid ? "yes" : "no");
   if (!batteryValid) return;
   // Conservative piecewise Li-ion voltage approximation; refine on hardware.
   static const int mv[] = {3200, 3400, 3550, 3650, 3700, 3750, 3800, 3850, 3900, 4000, 4100, 4200};
