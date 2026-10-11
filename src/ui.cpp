@@ -61,6 +61,38 @@ static constexpr uint32_t MENU_IDLE_MS = 15000;
 static uint32_t menuLastInput = 0;
 static bool menuScreensaver = false;
 
+// T-Deck Plus battery voltage on GPIO4 via 2:1 resistor divider.
+// Percentage is an approximate unloaded Li-ion estimate, not a fuel gauge.
+static constexpr int BATTERY_ADC_PIN = 4;
+static uint32_t batteryLastRead = 0;
+static int batteryMv = 0;
+static int batteryPct = 0;
+static bool batteryValid = false;
+
+static void updateBattery(bool force = false) {
+  uint32_t now = millis();
+  if (!force && now - batteryLastRead < 30000) return;
+  batteryLastRead = now;
+  uint32_t totalMv = 0;
+  for (int i = 0; i < 12; ++i) totalMv += analogReadMilliVolts(BATTERY_ADC_PIN);
+  batteryMv = (int)((totalMv / 12) * 2); // 100k/100k battery divider
+  batteryValid = batteryMv >= 2800 && batteryMv <= 4400;
+  if (!batteryValid) return;
+  // Conservative piecewise Li-ion voltage approximation; refine on hardware.
+  static const int mv[] = {3200, 3400, 3550, 3650, 3700, 3750, 3800, 3850, 3900, 4000, 4100, 4200};
+  static const int pc[] = {0, 3, 8, 15, 25, 35, 45, 55, 65, 80, 92, 100};
+  batteryPct = 100;
+  if (batteryMv <= mv[0]) batteryPct = 0;
+  else for (int i = 1; i < 12; ++i) {
+    if (batteryMv <= mv[i]) {
+      batteryPct = pc[i - 1] + (batteryMv - mv[i - 1]) * (pc[i] - pc[i - 1]) / (mv[i] - mv[i - 1]);
+      break;
+    }
+  }
+  Serial.printf("BAT: %dmV ~%d%%\n", batteryMv, batteryPct);
+}
+
+
 // Reveal toggles for masked secrets (peek at WiFi / API keys).
 static bool setReveal = false;    // Settings screen: show real values
 static bool tiReveal  = false;    // text editor: show what you're typing
@@ -183,7 +215,12 @@ static void header(const String& title) {
   int bars = wifiBars();
   uint16_t wc = bars >= 3 ? C_ACCENT : (bars >= 1 ? C_WARN : C_MUTED);
   Icons::wifi(300, 3, bars, wc);
-  if (WifiMgr::isConnected() && !small) {
+  if (screen == Screen::MENU && batteryValid) {
+    fontSmall();
+    tft.setTextColor(batteryPct <= 15 ? C_WARN : C_ACCENT, C_PANEL);
+    String batt = "~" + String(batteryPct) + "% " + String(batteryMv / 1000.0f, 2) + "V";
+    tft.drawString(batt, 294 - tft.textWidth(batt), 8);
+  } else if (WifiMgr::isConnected() && !small) {
     fontSmall();
     tft.setTextColor(C_MUTED, C_PANEL);
     String ip = WifiMgr::ip();
@@ -1047,6 +1084,9 @@ static void drawAbout() {
 //  Public: begin / render
 // ---------------------------------------------------------------------------
 void begin() {
+  analogReadResolution(12);
+  analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);
+  updateBattery(true);
   tft_device.init();
   tft_device.setRotation(1);          // landscape 320x240
   tft_device.fillScreen(C_BG);
@@ -1500,6 +1540,7 @@ void touch(int x, int y) {
 // ---------------------------------------------------------------------------
 void tick() {
   WifiMgr::tick();
+  updateBattery();
   if (screen == Screen::SPLASH) {
     if (millis() - splashAt > 3000) { screen = Screen::MENU; dirty = true; }
     else                            { dirty = true; }   // keep the rain animating
