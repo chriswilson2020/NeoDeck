@@ -68,10 +68,11 @@ static uint32_t batteryLastRead = 0;
 static int batteryMv = 0;
 static int batteryPct = 0;
 static bool batteryValid = false;
+static bool batteryUsbLikely = false; // High reading associated with external USB power
 
 static void updateBattery(bool force = false) {
   uint32_t now = millis();
-  if (!force && now - batteryLastRead < 30000) return;
+  if (!force && now - batteryLastRead < 3000) return;
   batteryLastRead = now;
   uint32_t totalMv = 0;
   uint32_t totalRaw = 0;
@@ -81,7 +82,8 @@ static void updateBattery(bool force = false) {
   }
   batteryMv = (int)((totalMv / 12) * 2); // 100k/100k battery divider
   batteryValid = batteryMv >= 2800 && batteryMv <= 4400;
-  // Report invalid measurements too; samples repeat every 30 seconds.
+  batteryUsbLikely = batteryMv >= 4500; // Inference, not a charger-status measurement
+  // Report invalid measurements too; samples repeat every 3 seconds.
   Serial.printf("[bat] gpio=%d raw=%lu adc=%lumV vbat=%dmV valid=%s\n",
                 BATTERY_ADC_PIN, (unsigned long)(totalRaw / 12),
                 (unsigned long)(totalMv / 12), batteryMv,
@@ -228,7 +230,7 @@ static void header(const String& title) {
   if (screen == Screen::MENU) {
     // Reserve the right-hand side for the Wi-Fi icon (at x=300),
     // the battery estimate, and the IP address in that order.
-    String batt = batteryValid ? ("~" + String(batteryPct) + "%") : "BAT --";
+    String batt = batteryUsbLikely ? "USB" : (batteryValid ? ("~" + String(batteryPct) + "%") : "BAT --");
     int battX = 294 - tft.textWidth(batt);
     tft.setTextColor(batteryValid && batteryPct <= 15 ? C_WARN : C_ACCENT, C_PANEL);
     tft.drawString(batt, battX, 8);
