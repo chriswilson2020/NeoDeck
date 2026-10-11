@@ -215,13 +215,23 @@ static void header(const String& title) {
   int bars = wifiBars();
   uint16_t wc = bars >= 3 ? C_ACCENT : (bars >= 1 ? C_WARN : C_MUTED);
   Icons::wifi(300, 3, bars, wc);
-  if (screen == Screen::MENU && batteryValid) {
-    fontSmall();
-    tft.setTextColor(batteryPct <= 15 ? C_WARN : C_ACCENT, C_PANEL);
-    String batt = "~" + String(batteryPct) + "% " + String(batteryMv / 1000.0f, 2) + "V";
-    tft.drawString(batt, 294 - tft.textWidth(batt), 8);
+  fontSmall();
+  if (screen == Screen::MENU) {
+    // Reserve the right-hand side for the Wi-Fi icon (at x=300),
+    // the battery estimate, and the IP address in that order.
+    String batt = batteryValid ? ("~" + String(batteryPct) + "%") : "BAT --";
+    int battX = 294 - tft.textWidth(batt);
+    tft.setTextColor(batteryValid && batteryPct <= 15 ? C_WARN : C_ACCENT, C_PANEL);
+    tft.drawString(batt, battX, 8);
+    if (WifiMgr::isConnected()) {
+      String ip = WifiMgr::ip();
+      int ipX = battX - 8 - tft.textWidth(ip);
+      if (ipX >= 105) {
+        tft.setTextColor(C_MUTED, C_PANEL);
+        tft.drawString(ip, ipX, 8);
+      }
+    }
   } else if (WifiMgr::isConnected() && !small) {
-    fontSmall();
     tft.setTextColor(C_MUTED, C_PANEL);
     String ip = WifiMgr::ip();
     tft.drawString(ip, 294 - tft.textWidth(ip), 8);
