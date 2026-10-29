@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NeoDeck &mdash; T-Deck Plus SSH client</title>
+  <title>NeoDeck v0.9.0 &mdash; T-Deck Plus SSH client</title>
   <meta name="description" content="NeoDeck: a full-featured SSH client firmware for the LilyGo T-Deck Plus. Flash it from your browser." />
   <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
   <style>
@@ -41,12 +41,14 @@
 <div class="wrap">
   <header>
     <h1>NEODECK</h1>
-    <div class="sub">SSH client firmware &middot; LilyGo T-Deck Plus &middot; ESP32-S3</div>
+    <div class="sub">v0.9.0 &middot; Chris Wilson edition &middot; LilyGo T-Deck Plus</div>
   </header>
 
   <p>NeoDeck turns the LilyGo <strong>T-Deck Plus</strong> into a handheld SSH terminal:
      stored connections, a real cursor-addressable VT100/xterm screen, an on-device
-     Claude AI assistant, and a Matrix-styled UI. Flash it straight from this page.</p>
+     Claude AI assistant, compact Unicode terminal graphics, physical Ctrl shortcuts,
+     trackball cursor keys, and a Matrix-styled UI. Flash this repository's current
+     build straight from this page.</p>
 
   <div class="flash panel">
     <h2 style="border:0;margin-top:0">Flash from your browser</h2>
@@ -59,7 +61,8 @@
     </esp-web-install-button>
     <div class="btnfallback">
       Works in <strong>Chrome</strong> or <strong>Edge</strong> on desktop (Web Serial).
-      Plug the T-Deck in over USB-C, click Install, pick the serial port.
+      Plug the T-Deck in over USB-C, click Install, and pick its serial port.
+      Installing this page gives you <strong>v0.9.0 &mdash; Chris Wilson edition</strong>.
     </div>
   </div>
 
@@ -102,17 +105,23 @@
         password or key, then <em>Save</em>.</li>
     <li>Select the connection to open the terminal. Trackball click opens the
         <strong>Session</strong> menu (Ctrl-C, Tab, Esc, Ctrl-D, scrollback, AI, clear, disconnect).</li>
+    <li>Move the trackball to send arrow keys. Hold <strong>Mic + Shift</strong> while
+        pressing a letter to send the corresponding Ctrl shortcut.</li>
     <li>Optionally set an Anthropic API key in <strong>Settings</strong> for the on-device AI assistant.</li>
   </ol>
   <p class="note">Settings are stored on the SD card when present (so they survive launching in and
      out of NeoDeck), otherwise in internal flash.</p>
 
   <h2>Build it yourself</h2>
+  <p>Direct downloads: <a href="firmware/NeoDeck-merged.bin">complete browser/USB image</a>
+     (flash at <code>0x0</code>) or <a href="firmware/neodeck.bin">Launcher app image</a>.</p>
   <pre>pio run                 # compile
 pio run -t upload       # flash over USB-C
 pio device monitor      # serial @115200</pre>
-  <p>Full source, hardware notes and architecture:
-     <a href="https://github.com/justynroberts/NeoDeck">github.com/justynroberts/NeoDeck</a>.</p>
+  <p>Full source, hardware notes, releases, and architecture:
+     <a href="https://github.com/chriswilson2020/NeoDeck">github.com/chriswilson2020/NeoDeck</a>.
+     This edition is derived from
+     <a href="https://github.com/justynroberts/NeoDeck">Justyn Roberts' original NeoDeck</a>.</p>
 
   <p class="note" style="text-align:center;margin-top:50px">
     NeoDeck is a personal handheld tool &mdash; secrets are stored in plaintext on the device.

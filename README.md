@@ -12,7 +12,7 @@ profiles, a real cursor-addressable terminal over [libssh](https://www.libssh.or
 an on-device **AI co-pilot** powered by the Claude API, and a Matrix-styled UI with
 tumbling katakana rain.
 
-> **Flash it from your browser:** **https://justynroberts.github.io/NeoDeck/**
+> **Flash this v0.9.0 build from your browser:** **https://chriswilson2020.github.io/NeoDeck/**
 > (Chrome/Edge desktop, Web Serial). Or load it from an SD card via the
 > [bmorcelli Launcher](https://github.com/bmorcelli/Launcher).
 
@@ -49,9 +49,11 @@ libssh + mbedTLS + scrollback + the framebuffer will not fit in internal RAM.
 
 ### Option A — Web flasher (easiest)
 
-Open **https://justynroberts.github.io/NeoDeck/** in Chrome or Edge on desktop,
+Open **https://chriswilson2020.github.io/NeoDeck/** in Chrome or Edge on desktop,
 plug the T-Deck in over USB-C, and click **Install**. This writes a full image at
-`0x0` and **replaces whatever firmware is on the board**.
+`0x0` and **replaces whatever firmware is on the board**. The installer and its
+firmware are published from this repository's `docs/` directory, so the displayed
+version must say **0.9.0 — Chris Wilson edition** before you continue.
 
 ### Option B — From an SD card via the Launcher
 
