@@ -44,3 +44,55 @@ InputEvent Input::poll() {
 
   return {EvType::NONE, 0};
 }
+
+// Explicitly invoked from USB serial console with 'K'. This diagnostic is
+// deliberately NOT an automatic boot probe: an older C3 keyboard firmware
+// may ignore raw mode and must not be classified as supporting it.
+// LilyGO commands: 0x03 raw, 0x04 normal; raw reply = five matrix bytes.
+void runKeyboardRawDiagnostic() {
+  Serial.println("[kbd] Diagnostic: press Mic, Shift, and Shift+Mic in turn.");
+  Serial.println("[kbd] Raw protocol probe (6 seconds); input pauses during test.");
+  Wire.beginTransmission(KEYBOARD_ADDR);
+  Wire.write((uint8_t)0x03);
+  int status = Wire.endTransmission();
+  Serial.printf("[kbd] raw command I2C status=%d (ACK does NOT prove support)\n", status);
+  if (status == 0) {
+    delay(50);
+    uint8_t previous[5] = {0};
+    bool havePrevious = false;
+    int fiveByteReads = 0;
+    int changed = 0;
+    uint32_t started = millis();
+    while (millis() - started < 6000) {
+      uint8_t keys[5] = {0};
+      int count = Wire.requestFrom((int)KEYBOARD_ADDR, 5);
+      int actual = 0;
+      while (Wire.available() && actual < 5) keys[actual++] = Wire.read();
+      if (count == 5 && actual == 5) {
+        ++fiveByteReads;
+        bool different = !havePrevious;
+        for (int i = 0; i < 5; ++i)
+          if (havePrevious && keys[i] != previous[i]) different = true;
+        if (different) {
+          ++changed;
+          Serial.printf("[kbd] raw: %02X %02X %02X %02X %02X | mic=%d leftShift=%d rightShift=%d\n",
+                        keys[0], keys[1], keys[2], keys[3], keys[4],
+                        !!(keys[0] & (1u << 6)), !!(keys[1] & (1u << 6)),
+                        !!(keys[2] & (1u << 3)));
+          memcpy(previous, keys, sizeof(previous));
+          havePrevious = true;
+        }
+      } else {
+        Serial.printf("[kbd] short read: requested=5 returned=%d actual=%d\n", count, actual);
+      }
+      delay(60);
+    }
+    Serial.printf("[kbd] five-byte reads=%d state changes=%d\n", fiveByteReads, changed);
+    Serial.println("[kbd] Confirm raw support ONLY if Mic/Shift bits follow actual presses.");
+  }
+  // Restore character mode even if the command was unrecognized.
+  Wire.beginTransmission(KEYBOARD_ADDR);
+  Wire.write((uint8_t)0x04);
+  int restore = Wire.endTransmission();
+  Serial.printf("[kbd] restored normal mode, I2C status=%d\n", restore);
+}
