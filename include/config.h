@@ -78,6 +78,8 @@ struct AppConfig {
   std::vector<WifiProfile> wifiNetworks; // first item has highest priority
   String anthropicKey;                 // Claude API key for the AI assistant
   String aiModel = "claude-opus-4-8";  // or "claude-haiku-4-5" for speed
+  String lockSalt;
+  String lockHash;
   std::vector<SshEnv> envs;
 };
 

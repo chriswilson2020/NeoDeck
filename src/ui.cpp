@@ -13,6 +13,8 @@
 #include "keys.h"
 #include "fsx.h"
 #include "touch.h"
+#include <mbedtls/sha256.h>
+#include <esp_system.h>
 #include "matrix_glyphs.h"
 #include "usb_storage.h"
 #include "terminal_unicode.h"
@@ -39,7 +41,7 @@ namespace UI {
 // ---------------------------------------------------------------------------
 enum class Screen {
   SPLASH, MENU, ENV_LIST, ENV_EDIT, TERMINAL, SESSION_MENU,
-  AI_INPUT, AI_RESULT, SETTINGS, TEXT_INPUT, HOSTKEY, WIFI, ABOUT
+  AI_INPUT, AI_RESULT, SETTINGS, TEXT_INPUT, HOSTKEY, WIFI, ABOUT, LOCK
 };
 
 static Screen   screen   = Screen::SPLASH;
@@ -64,6 +66,40 @@ static String settingsImportMsg;
 static constexpr uint32_t MENU_IDLE_MS = 15000;
 static uint32_t menuLastInput = 0;
 static bool menuScreensaver = false;
+static String lockEntry, lockMessage;
+static bool startupLockChecked = false;
+
+static String bytesHex(const uint8_t* data, size_t len) {
+  static const char hex[] = "0123456789abcdef";
+  String out; out.reserve(len * 2);
+  for (size_t i = 0; i < len; ++i) { out += hex[data[i] >> 4]; out += hex[data[i] & 15]; }
+  return out;
+}
+
+static String pinDigest(const String& salt, const String& pin) {
+  uint8_t digest[32] = {0};
+  String input = salt + pin;
+  for (int round = 0; round < 4096; ++round) {
+    mbedtls_sha256_context ctx; mbedtls_sha256_init(&ctx);
+    mbedtls_sha256_starts_ret(&ctx, 0);
+    if (round) mbedtls_sha256_update_ret(&ctx, digest, sizeof(digest));
+    mbedtls_sha256_update_ret(&ctx, (const unsigned char*)input.c_str(), input.length());
+    mbedtls_sha256_finish_ret(&ctx, digest); mbedtls_sha256_free(&ctx);
+  }
+  return bytesHex(digest, sizeof(digest));
+}
+
+static void lockDevice() { lockEntry = ""; lockMessage = ""; screen = Screen::LOCK; dirty = true; }
+
+static void setDevicePin(const String& pin) {
+  if (pin.isEmpty()) { gConfig.lockSalt = ""; gConfig.lockHash = ""; Storage::save(); return; }
+  if (pin.length() < 4 || pin.length() > 8) { settingsImportMsg = "PIN must be 4-8 digits"; return; }
+  for (char c : pin) if (c < '0' || c > '9') { settingsImportMsg = "PIN must contain only digits"; return; }
+  uint8_t salt[16]; for (uint8_t& b : salt) b = (uint8_t)esp_random();
+  gConfig.lockSalt = bytesHex(salt, sizeof(salt));
+  gConfig.lockHash = pinDigest(gConfig.lockSalt, pin);
+  settingsImportMsg = Storage::save() ? "Device PIN enabled" : "Could not save PIN";
+}
 
 // T-Deck Plus battery voltage on GPIO4 via 2:1 resistor divider.
 // Percentage is an approximate unloaded Li-ion estimate, not a fuel gauge.
@@ -1088,11 +1124,12 @@ static void drawSettings() {
     "AI Model: "  + gConfig.aiModel,
     "Save & reconnect WiFi",
     "Import WiFi/API from flash",
+    "Device PIN: " + String(gConfig.lockHash.length() ? "enabled" : "disabled"),
   };
-  static const uint16_t ic[] = {C_BLUE, C_BLUE, C_PURPLE, C_CYAN, C_ACCENT, C_ACCENT};
+  static const uint16_t ic[] = {C_BLUE, C_BLUE, C_PURPLE, C_CYAN, C_ACCENT, C_ACCENT, C_WARN};
   const int y0 = HDR_H + 6, rh = 30, ch = rh - 5;
   const int off = max(0, setSel - 4);
-  for (int i = off; i < 6 && i < off + 5; i++) {
+  for (int i = off; i < 7 && i < off + 5; i++) {
     int y = y0 + (i - off) * rh;
     bool s = (i == setSel);
     tft.fillRoundRect(8, y, 304, ch, 5, s ? C_PANEL2 : C_PANEL);
@@ -1146,6 +1183,19 @@ static void drawSettings() {
     tft.fillRoundRect(200, 224, 70, 14, 4, C_ACCENT_D);
     tft.setTextColor(C_BG, C_ACCENT_D);
     tft.drawString("saved OK", 208, 227);
+  }
+}
+
+static void drawLock() {
+  tft.fillSprite(C_BG); header("NeoDeck locked");
+  fontUi(); tft.setTextColor(C_TEXT, C_BG); tft.drawCentreString("Enter PIN", 160, 30, 1);
+  fontSmall(); tft.setTextColor(lockMessage.length() ? C_ERR : C_ACCENT, C_BG);
+  tft.drawCentreString(lockMessage.length() ? lockMessage : dots(lockEntry.length()), 160, 52, 1);
+  const char* keys[12] = {"1","2","3","4","5","6","7","8","9","DEL","0","OK"};
+  for (int i = 0; i < 12; ++i) {
+    int col = i % 3, row = i / 3, x = 20 + col * 100, y = 72 + row * 40;
+    tft.fillRoundRect(x, y, 80, 32, 5, C_PANEL); tft.drawRoundRect(x, y, 80, 32, 5, C_ACCENT_D);
+    fontUi(); tft.setTextColor(C_TEXT, C_PANEL); tft.drawCentreString(keys[i], x + 40, y + 7, 1);
   }
 }
 
@@ -1453,6 +1503,7 @@ void render() {
     case Screen::HOSTKEY:      drawHostKey(); break;
     case Screen::WIFI:         drawWifi(); break;
     case Screen::ABOUT:        drawAbout(); break;
+    case Screen::LOCK:         drawLock(); break;
   }
   if (drew) present();
   dirty = false;
@@ -1680,8 +1731,8 @@ static void handleAiResult(const InputEvent& ev) {
 }
 
 static void handleSettings(const InputEvent& ev) {
-  if (ev.type == EvType::UP)    { setSel = (setSel + 5) % 6; dirty = needClear = true; }
-  if (ev.type == EvType::DOWN)  { setSel = (setSel + 1) % 6; dirty = needClear = true; }
+  if (ev.type == EvType::UP)    { setSel = (setSel + 6) % 7; dirty = needClear = true; }
+  if (ev.type == EvType::DOWN)  { setSel = (setSel + 1) % 7; dirty = needClear = true; }
   if (ev.type == EvType::RIGHT) { setReveal = !setReveal;    dirty = true; }   // peek secrets
   if (ev.type == EvType::LEFT || ev.ch == '`') { setReveal = false; screen = Screen::MENU; dirty = true; }
   if (ev.type == EvType::SELECT || ev.ch == '\r') {
@@ -1696,9 +1747,23 @@ static void handleSettings(const InputEvent& ev) {
         settingsImportMsg = Storage::importFlashCredentials();
         needClear = true;
         break;
+      case 6: startEdit("PIN (empty disables)", "", true, Screen::SETTINGS, setDevicePin); break;
     }
     dirty = true;
   }
+}
+
+static void submitPin() {
+  if (pinDigest(gConfig.lockSalt, lockEntry) == gConfig.lockHash) {
+    lockEntry = ""; lockMessage = ""; screen = Screen::MENU; menuLastInput = millis(); dirty = true;
+  } else { lockEntry = ""; lockMessage = "Incorrect PIN"; dirty = true; }
+}
+
+static void handleLock(const InputEvent& ev) {
+  if (ev.type != EvType::CHAR) return;
+  if (ev.ch == '\r') submitPin();
+  else if (ev.ch == 0x08) { if (lockEntry.length()) lockEntry.remove(lockEntry.length() - 1); lockMessage = ""; dirty = true; }
+  else if (ev.ch >= '0' && ev.ch <= '9' && lockEntry.length() < 8) { lockEntry += ev.ch; lockMessage = ""; dirty = true; }
 }
 
 static void handleWifi(const InputEvent& ev) {
@@ -1781,6 +1846,7 @@ void handle(const InputEvent& ev) {
     case Screen::HOSTKEY:      handleHostKey(ev); break;
     case Screen::WIFI:         handleWifi(ev); break;
     case Screen::ABOUT:        handleAbout(ev); break;
+    case Screen::LOCK:         handleLock(ev); break;
   }
 }
 
@@ -1790,6 +1856,20 @@ void handle(const InputEvent& ev) {
 //  reuse the existing keyboard/trackball handlers by synthesizing events.
 // ---------------------------------------------------------------------------
 void touch(int x, int y) {
+  if (screen == Screen::LOCK) {
+    if (y >= 72 && y < 232) {
+      int col = (x - 20) / 100, row = (y - 72) / 40;
+      if (x >= 20 && col >= 0 && col < 3 && row >= 0 && row < 4) {
+        int i = row * 3 + col;
+        const char* keys[12] = {"1","2","3","4","5","6","7","8","9","D","0","O"};
+        char key = keys[i][0];
+        if (key == 'D') handleLock({EvType::CHAR, 0x08});
+        else if (key == 'O') submitPin();
+        else handleLock({EvType::CHAR, key});
+      }
+    }
+    return;
+  }
   if (screen == Screen::MENU) {
     menuLastInput = millis();
     if (menuScreensaver) {
@@ -1841,7 +1921,7 @@ void touch(int x, int y) {
     case Screen::SETTINGS: {
       const int y0 = HDR_H + 6, rh = 30, ch = rh - 5;
       const int off = max(0, setSel - 4);
-      for (int i = off; i < 6 && i < off + 5; i++) {
+      for (int i = off; i < 7 && i < off + 5; i++) {
         int ry = y0 + (i - off) * rh;
         if (y >= ry && y < ry + ch) { setSel = i; dirty = true; handleSettings({EvType::SELECT, 0}); break; }
       }
@@ -1883,14 +1963,18 @@ void tick() {
   WifiMgr::tick();
   updateBattery();
   if (screen == Screen::SPLASH) {
-    if (millis() - splashAt > 3000) { screen = Screen::MENU; dirty = true; }
+    if (millis() - splashAt > 3000) {
+      if (!startupLockChecked && gConfig.lockHash.length()) lockDevice();
+      else { screen = Screen::MENU; dirty = true; }
+      startupLockChecked = true;
+    }
     else                            { dirty = true; }   // keep the rain animating
   }
   // Animate the menu's rain background at ~14 fps.
   if (screen == Screen::MENU) {
     if (!menuScreensaver && millis() - menuLastInput >= MENU_IDLE_MS) {
-      menuScreensaver = true;
-      dirty = true;
+      if (gConfig.lockHash.length()) lockDevice();
+      else { menuScreensaver = true; dirty = true; }
     }
     static uint32_t lastRain = 0;
     if (millis() - lastRain > 70) { lastRain = millis(); dirty = true; }

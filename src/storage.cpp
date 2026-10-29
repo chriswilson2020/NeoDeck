@@ -37,6 +37,8 @@ bool load() {
     gConfig.wifiNetworks.push_back({gConfig.wifiSsid, gConfig.wifiPass});
   gConfig.anthropicKey = doc["anthropicKey"] | "";
   gConfig.aiModel      = doc["aiModel"]      | "claude-opus-4-8";
+  gConfig.lockSalt     = doc["lockSalt"]     | "";
+  gConfig.lockHash     = doc["lockHash"]     | "";
 
   gConfig.envs.clear();
   for (JsonObject o : doc["envs"].as<JsonArray>()) {
@@ -67,6 +69,8 @@ bool save() {
   }
   doc["anthropicKey"] = gConfig.anthropicKey;
   doc["aiModel"]      = gConfig.aiModel;
+  doc["lockSalt"]     = gConfig.lockSalt;
+  doc["lockHash"]     = gConfig.lockHash;
 
   JsonArray arr = doc["envs"].to<JsonArray>();
   for (auto& e : gConfig.envs) {

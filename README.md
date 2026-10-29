@@ -45,6 +45,10 @@ tumbling katakana rain.
   incremental redraws. DEC scrolling regions keep independently scrolling panes
   synchronized in applications such as `nchat`.
 - 📶 **WiFi manager** with network picker and stored credentials.
+- 🔒 **Optional device PIN lock** — a 4–8 digit PIN unlocks from a large
+  touchscreen keypad (keyboard entry also works), is required after startup,
+  and automatically locks when the home menu reaches its idle timeout. Only a
+  salted, iterated PIN hash is stored; set or disable it from Settings.
 
 ## Hardware
 
@@ -111,6 +115,8 @@ esptool.py --chip esp32s3 merge_bin -o docs/firmware/NeoDeck-merged.bin \
 3. Select it to open the terminal. **Trackball click** = Session menu.
 4. Optional: set an Anthropic API key in **Settings** for the AI assistant. In
    Settings, trackball **right** peeks the stored secrets.
+5. Optional: select **Device PIN** in Settings, enter 4–8 digits, and save. Enter
+   an empty PIN there later to disable the lock.
 
 ## USB SD card transfer
 
