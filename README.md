@@ -147,6 +147,24 @@ c++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 | Scrollback     | up/down pan history, left = back to live    | —                                |
 | Editors        | click = show/hide a masked field            | type, Enter = save, Backspace = delete |
 
+## Keyboard raw-mode diagnostic (USB serial)
+
+The LilyGO ESP32-C3 keyboard firmware added a five-byte physical-key matrix
+readout in June 2025. **NeoDeck does not assume your keyboard has this update.**
+
+1. Build and flash this branch to the ESP32-S3 as usual.
+2. Open `pio device monitor -b 115200` with the USB cable connected.
+3. Type an uppercase **K** in the serial monitor to run a six-second test.
+4. While it is running, press **Mic**, **left Shift**, and **Shift+Mic**.
+5. Check the printed `raw:` rows: Mic is column 0 bit 6, left Shift
+   column 1 bit 6, right Shift column 2 bit 3. A count of five bytes alone
+   is not proof: the bits must respond to the physical key presses.
+
+The diagnostic always sends command `0x04` to restore the normal character
+mode after the test. NeoDeck otherwise continues using the existing keyboard
+driver; no modifier mapping is altered. The test temporarily pauses the UI
+for six seconds. This is a manual diagnostic, not a firmware version query.
+
 ## Architecture
 
 Single-binary firmware with a cooperative main loop in `src/main.cpp`
