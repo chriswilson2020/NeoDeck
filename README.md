@@ -39,8 +39,9 @@ tumbling katakana rain.
   Drawing (U+2500–U+257F), Block Elements (U+2580–U+259F), four arrows, degree,
   Braille Patterns (U+2800–U+28FF), and a visible replacement for unknown glyphs.
 - 🧱 **ncurses compatibility** — VT100 DEC special-graphics character sets and
-  reverse-video attributes render borders and highlighted bars correctly in
-  applications such as `nchat`.
+  reverse-video attributes render borders and highlighted bars correctly, while
+  erase/insert/delete character and line operations prevent stale text during
+  incremental redraws in applications such as `nchat`.
 - 📶 **WiFi manager** with network picker and stored credentials.
 
 ## Hardware
@@ -228,7 +229,7 @@ docs/                    GitHub Pages web flasher (index.html + manifest + merge
   an I2C bus scan; if it isn't detected the pin/address may need adjusting in
   `include/config.h`.
 - Terminal: no alternate-screen buffer (exiting `vim` won't restore what was behind
-  it — use Session → Clear), no 256/truecolor, no insert/delete-char/line.
+  it — use Session → Clear) and no 256/truecolor.
 - Unicode outside the documented terminal-oriented ranges is shown as a visible
   replacement cell rather than using a general-purpose Unicode font.
 - Board pins in `include/config.h` are the documented T-Deck values; verify before

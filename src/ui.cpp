@@ -467,6 +467,48 @@ static void eraseLine(int mode) {              // CSI K
   else                clearRowRange(curR, 0, TERM_COLS - 1);
 }
 
+static void eraseChars(int count) {            // CSI X
+  clearRowRange(curR, curC, min(TERM_COLS - 1, curC + count - 1));
+}
+
+static void insertChars(int count) {           // CSI @
+  count = min(count, TERM_COLS - curC);
+  for (int c = TERM_COLS - 1; c >= curC + count; --c) {
+    gCh[curR][c] = gCh[curR][c - count];
+    gCol[curR][c] = gCol[curR][c - count];
+  }
+  clearRowRange(curR, curC, curC + count - 1);
+}
+
+static void deleteChars(int count) {           // CSI P
+  count = min(count, TERM_COLS - curC);
+  for (int c = curC; c < TERM_COLS - count; ++c) {
+    gCh[curR][c] = gCh[curR][c + count];
+    gCol[curR][c] = gCol[curR][c + count];
+  }
+  clearRowRange(curR, TERM_COLS - count, TERM_COLS - 1);
+}
+
+static void insertLines(int count) {           // CSI L
+  count = min(count, TERM_ROWS - curR);
+  for (int r = TERM_ROWS - 1; r >= curR + count; --r)
+    for (int c = 0; c < TERM_COLS; ++c) {
+      gCh[r][c] = gCh[r - count][c];
+      gCol[r][c] = gCol[r - count][c];
+    }
+  for (int r = curR; r < curR + count; ++r) clearRowRange(r, 0, TERM_COLS - 1);
+}
+
+static void deleteLines(int count) {           // CSI M
+  count = min(count, TERM_ROWS - curR);
+  for (int r = curR; r < TERM_ROWS - count; ++r)
+    for (int c = 0; c < TERM_COLS; ++c) {
+      gCh[r][c] = gCh[r + count][c];
+      gCol[r][c] = gCol[r + count][c];
+    }
+  for (int r = TERM_ROWS - count; r < TERM_ROWS; ++r) clearRowRange(r, 0, TERM_COLS - 1);
+}
+
 // Apply a CSI ("ESC[ ... <final>") sequence. `p` is the parameter string.
 static void applyCsi(char fb, const String& p) {
   if (fb == 'm') { applySgr(p); return; }
@@ -490,9 +532,14 @@ static void applyCsi(char fb, const String& p) {
     case 'd': curR = (a < 1 ? 1 : a) - 1; clampCursor(); break;
     case 'J': eraseDisplay(a < 0 ? 0 : a); break;
     case 'K': eraseLine(a < 0 ? 0 : a); break;
+    case 'X': eraseChars(n); break;
+    case '@': insertChars(n); break;
+    case 'P': deleteChars(n); break;
+    case 'L': insertLines(n); break;
+    case 'M': deleteLines(n); break;
     case 's': savedR = curR; savedC = curC; break;
     case 'u': curR = savedR; curC = savedC; clampCursor(); break;
-    default: break;                         // P/@/L/M/r etc. ignored for now
+    default: break;
   }
 }
 
