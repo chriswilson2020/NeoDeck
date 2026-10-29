@@ -64,6 +64,13 @@ void setup() {
 }
 
 void loop() {
+  // Send uppercase K through the USB serial monitor to test keyboard raw mode.
+  // Never probe automatically: users without updated C3 firmware must retain
+  // normal input, and the C3 has no version/status command.
+  if (Serial.available()) {
+    int diagnosticCommand = Serial.read();
+    if (diagnosticCommand == 'K') runKeyboardRawDiagnostic();
+  }
   if (usbStorageBoot) {
     UsbStorage::tick(gInput.poll());
     delay(4);
