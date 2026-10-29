@@ -111,6 +111,7 @@ static bool setReveal = false;    // Settings screen: show real values
 static bool tiReveal  = false;    // text editor: show what you're typing
 
 // Terminal scrollback view.
+static bool ctrlNextKey = false; // Ctrl prefix from Session menu (one following letter)
 static bool termScrollMode = false;
 static int  termScrollOff  = 0;   // lines scrolled up from the live bottom
 
@@ -186,7 +187,7 @@ static std::function<void(const String&)> tiDone;
 
 // Terminal session action menu (trackball click in the terminal).
 static const char* kSess[] = {
-  "Ask AI about output", "Paste last AI cmd", "Ctrl-C  interrupt",
+  "Ask AI about output", "Paste last AI cmd", "Ctrl + next key",
   "Tab  complete", "Esc", "Ctrl-D  EOF",
   "Scroll history", "Clear screen", "Disconnect"
 };
@@ -599,7 +600,8 @@ static int termMaxScroll() { return (int)term.size(); }
 static void termDraw() {
   // Header shows the host, and flips to a SCROLL banner in scrollback mode.
   if (termScrollMode) header(String("scroll ") + editEnv.user + "@" + editEnv.host);
-  else                header(String("ssh ")    + editEnv.user + "@" + editEnv.host);
+  else if (ctrlNextKey) header("CTRL: press letter");
+  else                  header(String("ssh ") + editEnv.user + "@" + editEnv.host);
   tft.fillRect(0, HDR_H, 320, 240 - HDR_H, C_BG);
 
   // Until the shell is live, show the connection status / error as a clear,
@@ -1232,6 +1234,7 @@ void render() {
 static void connectTo(int i) {
   editEnv = gConfig.envs[i];
   termReset();
+  ctrlNextKey = false;
   termScrollMode = false; termScrollOff = 0;
   gSsh.resize(TERM_COLS, TERM_ROWS);
   gSsh.start(editEnv);
@@ -1370,6 +1373,18 @@ static void handleTerminal(const InputEvent& ev) {
       ev.type == EvType::LEFT || ev.type == EvType::RIGHT) { termSendArrow(ev.type); return; }
   if (ev.type == EvType::CHAR) {
     char c = ev.ch;
+    if (ctrlNextKey) {
+      ctrlNextKey = false;
+      termDirty = true;
+      // ASCII Ctrl+A..Ctrl+Z, case insensitive. For any other key,
+      // cancel the prefix without sending an unexpected shell character.
+      if (c >= 'a' && c <= 'z') c = c - 'a' + 1;
+      else if (c >= 'A' && c <= 'Z') c = c - 'A' + 1;
+      else return;
+      char b[1] = {c};
+      gSsh.send(b, 1);
+      return;
+    }
     if (c == '\r') gSsh.send("\n");      // map keyboard Enter to newline
     else { char b[1] = {c}; gSsh.send(b, 1); }
   }
@@ -1385,13 +1400,13 @@ static void handleSessionMenu(const InputEvent& ev) {
       case 0: aiFromTerminal = true; aiQuestion = ""; aiTranscript = "";
               aiTurns = 0; AI::resetConversation(); screen = Screen::AI_INPUT; break;
       case 1: if (aiLastCmd.length()) { gSsh.send(aiLastCmd); gSsh.send("\n"); } break;
-      case 2: gSsh.send("\x03"); break;                // Ctrl-C
+      case 2: ctrlNextKey = true; break;             // Ctrl + following letter
       case 3: gSsh.send("\t");   break;                // Tab
       case 4: gSsh.send("\x1b"); break;                // Esc
       case 5: gSsh.send("\x04"); break;                // Ctrl-D
       case 6: termScrollMode = true; termScrollOff = 0; break;
       case 7: termReset(); break;                      // local clear
-      case 8: gSsh.stop(); screen = Screen::MENU; break;
+      case 8: ctrlNextKey = false; gSsh.stop(); screen = Screen::MENU; break;
     }
     dirty = true;
   }
