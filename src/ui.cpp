@@ -157,6 +157,7 @@ static uint16_t gCh[TERM_ROWS][TERM_COLS]; // on-screen Unicode code points
 static uint8_t gCol[TERM_ROWS][TERM_COLS]; // on-screen packed colors
 static int     curR = 0, curC = 0;         // cursor row / column
 static int     savedR = 0, savedC = 0;     // ESC 7 / CSI s save slot
+static int     scrollTop = 0, scrollBottom = TERM_ROWS - 1;
 static bool    appCursorKeys = false;       // DEC ?1h: arrows use SS3 (ESC O A-D)
 static bool    g0DecGraphics = false;
 static bool    g1DecGraphics = false;
@@ -386,6 +387,7 @@ static void clearRowRange(int r, int from, int to) {
 static void termReset() {
   term.clear();
   curR = curC = savedR = savedC = 0;
+  scrollTop = 0; scrollBottom = TERM_ROWS - 1;
   appCursorKeys = false;
   g0DecGraphics = g1DecGraphics = useG1Charset = false;
   curFg = 7; curBg = 0; curBold = curInverse = false;
@@ -403,16 +405,36 @@ static TLine rowToLine(int r) {
   return ln;
 }
 
-// Scroll the whole screen up one line; the top row drops into scrollback.
-static void scrollUp() {
-  term.push_back(rowToLine(0));
-  if ((int)term.size() > MAX_SCROLLBACK) term.erase(term.begin());
-  for (int r = 1; r < TERM_ROWS; r++)
-    for (int c = 0; c < TERM_COLS; c++) { gCh[r - 1][c] = gCh[r][c]; gCol[r - 1][c] = gCol[r][c]; }
-  clearRowRange(TERM_ROWS - 1, 0, TERM_COLS - 1);
+static void scrollRegionUp(int top, int bottom, int count = 1) {
+  count = min(count, bottom - top + 1);
+  while (count-- > 0) {
+    if (top == 0 && bottom == TERM_ROWS - 1) {
+      term.push_back(rowToLine(0));
+      if ((int)term.size() > MAX_SCROLLBACK) term.erase(term.begin());
+    }
+    for (int r = top + 1; r <= bottom; ++r)
+      for (int c = 0; c < TERM_COLS; ++c) {
+        gCh[r - 1][c] = gCh[r][c]; gCol[r - 1][c] = gCol[r][c];
+      }
+    clearRowRange(bottom, 0, TERM_COLS - 1);
+  }
 }
 
-static void newLine() { if (++curR >= TERM_ROWS) { scrollUp(); curR = TERM_ROWS - 1; } }
+static void scrollRegionDown(int top, int bottom, int count = 1) {
+  count = min(count, bottom - top + 1);
+  while (count-- > 0) {
+    for (int r = bottom; r > top; --r)
+      for (int c = 0; c < TERM_COLS; ++c) {
+        gCh[r][c] = gCh[r - 1][c]; gCol[r][c] = gCol[r - 1][c];
+      }
+    clearRowRange(top, 0, TERM_COLS - 1);
+  }
+}
+
+static void newLine() {
+  if (curR == scrollBottom) scrollRegionUp(scrollTop, scrollBottom);
+  else if (curR < TERM_ROWS - 1) ++curR;
+}
 
 static void putCell(uint16_t cp) {
   if (curC >= TERM_COLS) { curC = 0; newLine(); }   // wrap at right margin
@@ -490,8 +512,9 @@ static void deleteChars(int count) {           // CSI P
 }
 
 static void insertLines(int count) {           // CSI L
-  count = min(count, TERM_ROWS - curR);
-  for (int r = TERM_ROWS - 1; r >= curR + count; --r)
+  if (curR < scrollTop || curR > scrollBottom) return;
+  count = min(count, scrollBottom - curR + 1);
+  for (int r = scrollBottom; r >= curR + count; --r)
     for (int c = 0; c < TERM_COLS; ++c) {
       gCh[r][c] = gCh[r - count][c];
       gCol[r][c] = gCol[r - count][c];
@@ -500,13 +523,14 @@ static void insertLines(int count) {           // CSI L
 }
 
 static void deleteLines(int count) {           // CSI M
-  count = min(count, TERM_ROWS - curR);
-  for (int r = curR; r < TERM_ROWS - count; ++r)
+  if (curR < scrollTop || curR > scrollBottom) return;
+  count = min(count, scrollBottom - curR + 1);
+  for (int r = curR; r <= scrollBottom - count; ++r)
     for (int c = 0; c < TERM_COLS; ++c) {
       gCh[r][c] = gCh[r + count][c];
       gCol[r][c] = gCol[r + count][c];
     }
-  for (int r = TERM_ROWS - count; r < TERM_ROWS; ++r) clearRowRange(r, 0, TERM_COLS - 1);
+  for (int r = scrollBottom - count + 1; r <= scrollBottom; ++r) clearRowRange(r, 0, TERM_COLS - 1);
 }
 
 // Apply a CSI ("ESC[ ... <final>") sequence. `p` is the parameter string.
@@ -537,6 +561,16 @@ static void applyCsi(char fb, const String& p) {
     case 'P': deleteChars(n); break;
     case 'L': insertLines(n); break;
     case 'M': deleteLines(n); break;
+    case 'S': scrollRegionUp(scrollTop, scrollBottom, n); break;
+    case 'T': scrollRegionDown(scrollTop, scrollBottom, n); break;
+    case 'r': {
+      int top = (a < 1 ? 1 : a) - 1;
+      int bottom = (b < 1 ? TERM_ROWS : b) - 1;
+      if (top >= 0 && bottom < TERM_ROWS && top < bottom) {
+        scrollTop = top; scrollBottom = bottom; curR = curC = 0;
+      }
+      break;
+    }
     case 's': savedR = curR; savedC = curC; break;
     case 'u': curR = savedR; curC = savedC; clampCursor(); break;
     default: break;
@@ -563,7 +597,11 @@ static void termFeed(const String& data) {
         case '*': case '+': esc = 4; charsetTarget = -1; break;
         case '7': savedR = curR; savedC = curC; esc = 0; break;
         case '8': curR = savedR; curC = savedC; clampCursor(); esc = 0; break;
-        case 'M': if (curR > 0) curR--; esc = 0; break;          // reverse index
+        case 'D': newLine(); esc = 0; break;                     // index
+        case 'M':                                                // reverse index
+          if (curR == scrollTop) scrollRegionDown(scrollTop, scrollBottom);
+          else if (curR > 0) --curR;
+          esc = 0; break;
         default:  esc = 0; break;            // ESC = > etc.
       }
       continue;

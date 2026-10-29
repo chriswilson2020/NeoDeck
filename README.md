@@ -37,11 +37,13 @@ tumbling katakana rain.
   vectors, since no embedded font carries them.
 - 🔤 **Terminal Unicode fallbacks** — compact single-cell renderers cover Box
   Drawing (U+2500–U+257F), Block Elements (U+2580–U+259F), four arrows, degree,
-  Braille Patterns (U+2800–U+28FF), and a visible replacement for unknown glyphs.
+  Braille Patterns (U+2800–U+28FF), readable smart-quote/dash normalization,
+  and a visible replacement for unknown glyphs.
 - 🧱 **ncurses compatibility** — VT100 DEC special-graphics character sets and
   reverse-video attributes render borders and highlighted bars correctly, while
   erase/insert/delete character and line operations prevent stale text during
-  incremental redraws in applications such as `nchat`.
+  incremental redraws. DEC scrolling regions keep independently scrolling panes
+  synchronized in applications such as `nchat`.
 - 📶 **WiFi manager** with network picker and stored credentials.
 
 ## Hardware

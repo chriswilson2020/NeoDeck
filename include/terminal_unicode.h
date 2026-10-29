@@ -40,6 +40,9 @@ inline bool hasFallback(uint32_t cp) {
 // visible, single-cell replacement glyph.
 inline uint16_t cellCodepoint(uint32_t cp) {
   if (cp >= 0x20 && cp <= 0x7E) return static_cast<uint16_t>(cp);
+  if (cp == 0x2018 || cp == 0x2019) return '\'';
+  if (cp == 0x201C || cp == 0x201D) return '"';
+  if (cp == 0x2013 || cp == 0x2014) return '-';
   if (hasFallback(cp)) return static_cast<uint16_t>(cp);
   return Replacement;
 }

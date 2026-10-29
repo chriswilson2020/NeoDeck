@@ -32,6 +32,12 @@ int main() {
   }
 
   assert(cellCodepoint('A') == 'A');
+  assert(cellCodepoint(0x2018) == '\'');
+  assert(cellCodepoint(0x2019) == '\'');
+  assert(cellCodepoint(0x201C) == '"');
+  assert(cellCodepoint(0x201D) == '"');
+  assert(cellCodepoint(0x2013) == '-');
+  assert(cellCodepoint(0x2014) == '-');
   assert(cellCodepoint(0x2603) == Replacement); // unsupported snowman is visible
   assert(cellCodepoint(0x1F600) == Replacement); // unsupported non-BMP glyph
   assert(cellCodepoint(0) == Replacement);
