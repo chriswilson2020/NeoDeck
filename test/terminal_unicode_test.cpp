@@ -35,5 +35,13 @@ int main() {
   assert(cellCodepoint(0x2603) == Replacement); // unsupported snowman is visible
   assert(cellCodepoint(0x1F600) == Replacement); // unsupported non-BMP glyph
   assert(cellCodepoint(0) == Replacement);
+
+  assert(decSpecialGraphic('x') == 0x2502);
+  assert(decSpecialGraphic('q') == 0x2500);
+  assert(decSpecialGraphic('l') == 0x250C);
+  assert(decSpecialGraphic('k') == 0x2510);
+  assert(decSpecialGraphic('m') == 0x2514);
+  assert(decSpecialGraphic('j') == 0x2518);
+  assert(decSpecialGraphic('A') == 'A');
   puts("Terminal Unicode coverage tests passed");
 }

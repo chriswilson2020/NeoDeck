@@ -38,6 +38,9 @@ tumbling katakana rain.
 - 🔤 **Terminal Unicode fallbacks** — compact single-cell renderers cover Box
   Drawing (U+2500–U+257F), Block Elements (U+2580–U+259F), four arrows, degree,
   Braille Patterns (U+2800–U+28FF), and a visible replacement for unknown glyphs.
+- 🧱 **ncurses compatibility** — VT100 DEC special-graphics character sets and
+  reverse-video attributes render borders and highlighted bars correctly in
+  applications such as `nchat`.
 - 📶 **WiFi manager** with network picker and stored credentials.
 
 ## Hardware

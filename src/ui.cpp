@@ -158,11 +158,15 @@ static uint8_t gCol[TERM_ROWS][TERM_COLS]; // on-screen packed colors
 static int     curR = 0, curC = 0;         // cursor row / column
 static int     savedR = 0, savedC = 0;     // ESC 7 / CSI s save slot
 static bool    appCursorKeys = false;       // DEC ?1h: arrows use SS3 (ESC O A-D)
+static bool    g0DecGraphics = false;
+static bool    g1DecGraphics = false;
+static bool    useG1Charset = false;
 
 static bool    termDirty = true;
 static uint8_t curFg   = 7;                // current foreground palette index
 static uint8_t curBg   = 0;                // current background palette index
 static bool    curBold = false;
+static bool    curInverse = false;
 
 // 16-color xterm palette in RGB565 (0-7 normal, 8-15 bright).
 static const uint16_t kPal[16] = {
@@ -368,7 +372,9 @@ static void drawMainMenu() {
 static uint8_t effCell() {
   uint8_t fg = curFg;
   if (curBold && fg < 8) fg += 8;     // bold promotes normal colors to bright
-  return (uint8_t)(((curBg & 0x0F) << 4) | (fg & 0x0F));
+  uint8_t bg = curBg;
+  if (curInverse) { uint8_t swap = fg; fg = bg; bg = swap; }
+  return (uint8_t)(((bg & 0x0F) << 4) | (fg & 0x0F));
 }
 
 static void clearCell(int r, int c) { gCh[r][c] = ' '; gCol[r][c] = effCell(); }
@@ -381,7 +387,8 @@ static void termReset() {
   term.clear();
   curR = curC = savedR = savedC = 0;
   appCursorKeys = false;
-  curFg = 7; curBg = 0; curBold = false;
+  g0DecGraphics = g1DecGraphics = useG1Charset = false;
+  curFg = 7; curBg = 0; curBold = curInverse = false;
   for (int r = 0; r < TERM_ROWS; r++) clearRowRange(r, 0, TERM_COLS - 1);
   termDirty = true;
 }
@@ -416,14 +423,16 @@ static void putCodepoint(uint32_t cp) { putCell(TerminalUnicode::cellCodepoint(c
 // Apply an SGR ("ESC[ ... m") sequence: foreground, background and bold.
 static void applySgr(const String& params) {
   int i = 0, n = params.length();
-  if (n == 0) { curFg = 7; curBg = 0; curBold = false; return; }  // ESC[m == reset
+  if (n == 0) { curFg = 7; curBg = 0; curBold = curInverse = false; return; }  // ESC[m == reset
   while (i <= n) {
     int semi = params.indexOf(';', i);
     if (semi < 0) semi = n;
     int code = params.substring(i, semi).toInt();
-    if      (code == 0)                  { curFg = 7; curBg = 0; curBold = false; }
+    if      (code == 0)                  { curFg = 7; curBg = 0; curBold = curInverse = false; }
     else if (code == 1)                  { curBold = true; }
+    else if (code == 7)                  { curInverse = true; }
     else if (code == 22)                 { curBold = false; }
+    else if (code == 27)                 { curInverse = false; }
     else if (code >= 30 && code <= 37)   { curFg = code - 30; }
     else if (code == 39)                 { curFg = 7; }
     else if (code >= 40 && code <= 47)   { curBg = code - 40; }
@@ -490,6 +499,7 @@ static void applyCsi(char fb, const String& p) {
 // Append raw server bytes: a small VT100/xterm interpreter feeding the grid.
 static void termFeed(const String& data) {
   static int esc = 0;        // 0 normal, 1 ESC, 2 CSI, 3 OSC, 4 skip-one, 5 OSC-ST
+  static int charsetTarget = -1;
   static String csi;
   static int      u8need = 0;
   static uint32_t u8cp   = 0;
@@ -501,7 +511,9 @@ static void termFeed(const String& data) {
       switch (c) {
         case '[': esc = 2; csi = ""; break;
         case ']': esc = 3; break;            // OSC (title etc.) — consume to BEL/ST
-        case '(': case ')': case '*': case '+': esc = 4; break;  // charset: skip next
+        case '(': esc = 4; charsetTarget = 0; break;
+        case ')': esc = 4; charsetTarget = 1; break;
+        case '*': case '+': esc = 4; charsetTarget = -1; break;
         case '7': savedR = curR; savedC = curC; esc = 0; break;
         case '8': curR = savedR; curC = savedC; clampCursor(); esc = 0; break;
         case 'M': if (curR > 0) curR--; esc = 0; break;          // reverse index
@@ -519,7 +531,11 @@ static void termFeed(const String& data) {
       else if (c == 0x1B) esc = 5;
       continue;
     }
-    if (esc == 4) { esc = 0; continue; }     // charset designator byte
+    if (esc == 4) {
+      if (charsetTarget == 0) g0DecGraphics = (c == '0');
+      if (charsetTarget == 1) g1DecGraphics = (c == '0');
+      charsetTarget = -1; esc = 0; continue;
+    }
     if (esc == 5) { esc = 0; continue; }     // backslash of an ST terminator
 
     // UTF-8 assembly (Powerline glyphs and other multibyte sequences).
@@ -546,12 +562,18 @@ static void termFeed(const String& data) {
 
     switch (c) {
       case 0x1B: esc = 1; break;
+      case 0x0E: useG1Charset = true; break;
+      case 0x0F: useG1Charset = false; break;
       case '\n': newLine(); break;
       case '\r': curC = 0; break;
       case '\b': if (curC > 0) curC--; break;
       case '\t': curC = min(TERM_COLS - 1, (curC / 8 + 1) * 8); break;
       case 0x07: break;                       // bell — ignored
-      default:   if (c >= 32 && c < 0x80) putCodepoint(c);
+      default:
+        if (c >= 32 && c < 0x80) {
+          const bool decGraphics = useG1Charset ? g1DecGraphics : g0DecGraphics;
+          putCodepoint(decGraphics ? TerminalUnicode::decSpecialGraphic(c) : c);
+        }
     }
   }
   termDirty = true;

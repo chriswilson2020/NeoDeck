@@ -10,6 +10,25 @@ inline bool isPowerline(uint32_t cp) {
   return (cp >= 0xE0A0 && cp <= 0xE0A2) || (cp >= 0xE0B0 && cp <= 0xE0B3);
 }
 
+// VT100 DEC Special Graphics characters used by ncurses for borders.
+inline uint16_t decSpecialGraphic(uint8_t ch) {
+  switch (ch) {
+    case 'f': return 0x00B0; // degree
+    case 'j': return 0x2518; // lower-right corner
+    case 'k': return 0x2510; // upper-right corner
+    case 'l': return 0x250C; // upper-left corner
+    case 'm': return 0x2514; // lower-left corner
+    case 'n': return 0x253C; // crossing lines
+    case 'q': return 0x2500; // horizontal line
+    case 't': return 0x251C; // left tee
+    case 'u': return 0x2524; // right tee
+    case 'v': return 0x2534; // bottom tee
+    case 'w': return 0x252C; // top tee
+    case 'x': return 0x2502; // vertical line
+    default:  return ch;
+  }
+}
+
 inline bool hasFallback(uint32_t cp) {
   return (cp >= 0x2500 && cp <= 0x259F) ||
          cp == 0x2190 || cp == 0x2191 || cp == 0x2192 || cp == 0x2193 ||
