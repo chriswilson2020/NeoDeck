@@ -1529,7 +1529,10 @@ static void handleTerminal(const InputEvent& ev) {
       return;
     }
     if (c == '\r') gSsh.send("\n");      // map keyboard Enter to newline
-    else { char b[1] = {c}; gSsh.send(b, 1); }
+    else {
+      if (c == 0x08) c = 0x7F;            // xterm Backspace/Delete (terminfo kbs)
+      char b[1] = {c}; gSsh.send(b, 1);
+    }
   }
 }
 

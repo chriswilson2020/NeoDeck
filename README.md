@@ -182,7 +182,9 @@ c++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 
 In the live SSH terminal, trackball directions send cursor keys. NeoDeck follows
 DEC application-cursor mode automatically, so shells and full-screen programs
-such as `vim`, `nano`, and `btop` receive their expected arrow sequences.
+such as `vim`, `nano`, and `btop` receive their expected arrow sequences. The
+physical delete key sends the xterm Backspace/Delete byte expected by ncurses
+applications, while it continues to edit normally in NeoDeck's own forms.
 
 ## Ctrl shortcuts in SSH
 
