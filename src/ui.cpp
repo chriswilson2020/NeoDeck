@@ -157,6 +157,7 @@ static uint16_t gCh[TERM_ROWS][TERM_COLS]; // on-screen Unicode code points
 static uint8_t gCol[TERM_ROWS][TERM_COLS]; // on-screen packed colors
 static int     curR = 0, curC = 0;         // cursor row / column
 static int     savedR = 0, savedC = 0;     // ESC 7 / CSI s save slot
+static bool    appCursorKeys = false;       // DEC ?1h: arrows use SS3 (ESC O A-D)
 
 static bool    termDirty = true;
 static uint8_t curFg   = 7;                // current foreground palette index
@@ -379,6 +380,7 @@ static void clearRowRange(int r, int from, int to) {
 static void termReset() {
   term.clear();
   curR = curC = savedR = savedC = 0;
+  appCursorKeys = false;
   curFg = 7; curBg = 0; curBold = false;
   for (int r = 0; r < TERM_ROWS; r++) clearRowRange(r, 0, TERM_COLS - 1);
   termDirty = true;
@@ -459,8 +461,9 @@ static void eraseLine(int mode) {              // CSI K
 // Apply a CSI ("ESC[ ... <final>") sequence. `p` is the parameter string.
 static void applyCsi(char fb, const String& p) {
   if (fb == 'm') { applySgr(p); return; }
-  if (p.startsWith("?")) {                 // private modes (?25h cursor, ?1049h alt...)
-    return;                                 // consumed but not acted on
+  if (p.startsWith("?")) {
+    if (p == "?1" && (fb == 'h' || fb == 'l')) appCursorKeys = (fb == 'h');
+    return;
   }
   int a = -1, b = -1, semi = p.indexOf(';');
   if (semi < 0) { if (p.length()) a = p.toInt(); }
@@ -774,11 +777,12 @@ static void termDraw() {
 
 // Map trackball directions to ANSI cursor sequences for the shell.
 static void termSendArrow(EvType t) {
+  const char* prefix = appCursorKeys ? "\x1bO" : "\x1b[";
   switch (t) {
-    case EvType::UP:    gSsh.send("\x1b[A"); break;
-    case EvType::DOWN:  gSsh.send("\x1b[B"); break;
-    case EvType::RIGHT: gSsh.send("\x1b[C"); break;
-    case EvType::LEFT:  gSsh.send("\x1b[D"); break;
+    case EvType::UP:    gSsh.send(String(prefix) + "A"); break;
+    case EvType::DOWN:  gSsh.send(String(prefix) + "B"); break;
+    case EvType::RIGHT: gSsh.send(String(prefix) + "C"); break;
+    case EvType::LEFT:  gSsh.send(String(prefix) + "D"); break;
     default: break;
   }
 }
