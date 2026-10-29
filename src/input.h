@@ -26,4 +26,7 @@ class Input {
   uint32_t lastKbMs_ = 0;
 };
 
+// USB serial-triggered, bounded diagnostic. Restores normal character mode.
+void runKeyboardRawDiagnostic();
+
 extern Input gInput;
