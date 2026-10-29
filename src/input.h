@@ -20,13 +20,14 @@ class Input {
   InputEvent poll();   // returns one queued event, or {NONE}
 
  private:
+  uint8_t  lastKeys_[5] = {0, 0, 0, 0, 0};
   // Trackball edge tracking
   int      lastUp_ = HIGH, lastDn_ = HIGH, lastLt_ = HIGH, lastRt_ = HIGH;
   uint32_t lastClickMs_ = 0;
   uint32_t lastKbMs_ = 0;
 };
 
-// USB serial-triggered, bounded diagnostic. Restores normal character mode.
+// USB serial-triggered, bounded diagnostic. Restores NeoDeck raw input mode.
 void runKeyboardRawDiagnostic();
 
 extern Input gInput;

@@ -4,6 +4,28 @@
 
 Input gInput;
 
+static const char kLetters[5][7] = {
+  {'q', 'w', 0,   'a', 0,   ' ', 0},
+  {'e', 's', 'd', 'p', 'x', 'z', 0},
+  {'r', 'g', 't', 0,   'v', 'c', 'f'},
+  {'u', 'h', 'y', 0,   'b', 'n', 'j'},
+  {'o', 'l', 'i', 0,   '$', 'm', 'k'},
+};
+
+static const char kSymbols[5][7] = {
+  {'#', '1', 0,   '*', 0,   0,   '0'},
+  {'2', '4', '5', '@', '8', '7', 0},
+  {'3', '/', '(', 0,   '?', '9', '6'},
+  {'_', ':', ')', 0,   '!', ',', ';'},
+  {'+', '"', '-', 0,   0,   '.', '\''},
+};
+
+static void setKeyboardMode(uint8_t mode) {
+  Wire.beginTransmission(KEYBOARD_ADDR);
+  Wire.write(mode);
+  Wire.endTransmission();
+}
+
 void Input::begin() {
   Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL);
 
@@ -12,17 +34,45 @@ void Input::begin() {
   pinMode(TB_LEFT, INPUT_PULLUP);
   pinMode(TB_RIGHT, INPUT_PULLUP);
   pinMode(TB_CLICK, INPUT_PULLUP);
+
+  setKeyboardMode(0x03);
 }
 
 InputEvent Input::poll() {
-  // --- Keyboard: read one byte from the T-Deck keyboard MCU ---
-  // The keyboard returns 0x00 when nothing is pressed. Throttle slightly so a
-  // held key doesn't flood the UI.
+  // --- Keyboard: read the five-column physical key matrix ---
   if (millis() - lastKbMs_ > 8) {
     lastKbMs_ = millis();
-    if (Wire.requestFrom((int)KEYBOARD_ADDR, 1) == 1) {
-      int c = Wire.read();
-      if (c > 0) return {EvType::CHAR, (char)c};
+    uint8_t keys[5] = {0};
+    int count = Wire.requestFrom((int)KEYBOARD_ADDR, 5);
+    int actual = 0;
+    while (Wire.available() && actual < 5) keys[actual++] = Wire.read();
+    if (count == 5 && actual == 5) {
+      bool symbol = keys[0] & (1u << 2);
+      bool alt = keys[0] & (1u << 4);
+      bool mic = keys[0] & (1u << 6);
+      bool shift = (keys[1] & (1u << 6)) || (keys[2] & (1u << 3));
+
+      for (int row = 0; row < 7; ++row) {
+        for (int col = 0; col < 5; ++col) {
+          uint8_t bit = 1u << row;
+          if (!(keys[col] & bit) || (lastKeys_[col] & bit)) continue;
+
+          char c = 0;
+          if (col == 3 && row == 3) c = '\r';
+          else if (col == 4 && row == 3) c = 0x08;
+          else c = symbol ? kSymbols[col][row] : kLetters[col][row];
+
+          if (!c) continue;
+          memcpy(lastKeys_, keys, sizeof(lastKeys_));
+          if (alt && c == 'b') return {EvType::NONE, 0};
+          if (alt && c == 'c') return {EvType::CHAR, 0x0c};
+          if (mic && shift && c >= 'a' && c <= 'z')
+            return {EvType::CHAR, (char)(c - 'a' + 1)};
+          if (shift && c >= 'a' && c <= 'z') c -= 'a' - 'A';
+          return {EvType::CHAR, c};
+        }
+      }
+      memcpy(lastKeys_, keys, sizeof(lastKeys_));
     }
   }
 
@@ -90,9 +140,6 @@ void runKeyboardRawDiagnostic() {
     Serial.printf("[kbd] five-byte reads=%d state changes=%d\n", fiveByteReads, changed);
     Serial.println("[kbd] Confirm raw support ONLY if Mic/Shift bits follow actual presses.");
   }
-  // Restore character mode even if the command was unrecognized.
-  Wire.beginTransmission(KEYBOARD_ADDR);
-  Wire.write((uint8_t)0x04);
-  int restore = Wire.endTransmission();
-  Serial.printf("[kbd] restored normal mode, I2C status=%d\n", restore);
+  setKeyboardMode(0x03);
+  Serial.println("[kbd] restored NeoDeck raw input mode");
 }

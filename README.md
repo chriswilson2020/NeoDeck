@@ -160,10 +160,10 @@ readout in June 2025. **NeoDeck does not assume your keyboard has this update.**
    column 1 bit 6, right Shift column 2 bit 3. A count of five bytes alone
    is not proof: the bits must respond to the physical key presses.
 
-The diagnostic always sends command `0x04` to restore the normal character
-mode after the test. NeoDeck otherwise continues using the existing keyboard
-driver; no modifier mapping is altered. The test temporarily pauses the UI
-for six seconds. This is a manual diagnostic, not a firmware version query.
+NeoDeck uses the verified raw matrix for normal typing. Holding **Mic** and
+either **Shift** while pressing `A` through `Z` sends the corresponding ASCII
+control byte, so Shift+Mic+C is Ctrl-C. The test temporarily pauses the UI for
+six seconds, then restores raw input mode.
 
 ## Ctrl shortcuts in SSH
 
@@ -173,7 +173,8 @@ The T-Deck Plus stock I2C keyboard sends NeoDeck a single character byte per key
 2. Select **Ctrl + next key** (third entry).
 3. Press any letter `A` through `Z` to send its ASCII control byte to the remote SSH PTY. For example, `C` sends Ctrl-C, `D` sends Ctrl-D, `Z` sends Ctrl-Z, and `A` sends Ctrl-A. The prefix is automatically cleared after the next character; nonletters cancel it.
 
-Existing **Tab**, **Esc**, and **Ctrl-D** menu actions remain available. **Sym** and **Alt** mappings are unchanged. **Shift + Mic** is *not* implemented: it requires proven hardware modifier reporting or new keyboard-controller firmware.
+Existing **Tab**, **Esc**, and **Ctrl-D** menu actions remain available. The
+menu prefix remains as a fallback. **Sym** and **Alt** mappings are unchanged.
 
 ## Architecture
 
