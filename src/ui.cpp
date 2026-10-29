@@ -15,6 +15,8 @@
 #include "touch.h"
 #include "matrix_glyphs.h"
 #include "usb_storage.h"
+#include "terminal_unicode.h"
+#include "terminal_box_data.h"
 
 // The real panel, plus the off-screen framebuffer everything draws into. `tft`
 // is a full-screen sprite (PSRAM) named to match the rest of the code, so all
@@ -111,7 +113,7 @@ static bool setReveal = false;    // Settings screen: show real values
 static bool tiReveal  = false;    // text editor: show what you're typing
 
 // Terminal scrollback view.
-static bool ctrlNextKey = false; // Ctrl prefix from Session menu (one following letter)
+static bool ctrlNextKey = false;
 static bool termScrollMode = false;
 static int  termScrollOff  = 0;   // lines scrolled up from the live bottom
 
@@ -127,14 +129,31 @@ static int    editIndex = -1;
 // Terminal emulator. This is a real cursor-addressable screen: a fixed grid of
 // cells (TERM_ROWS x TERM_COLS) the cursor writes into, so full-screen apps that
 // use CSI cursor-positioning + erase (vim, htop, nano, top, less) render
-// correctly instead of as an append-only mess. Each cell holds a char (or a
-// Powerline glyph sentinel) plus a packed color byte: (bg << 4) | fg, giving
+// correctly instead of as an append-only mess. Each cell holds a Unicode code
+// point plus a packed color byte: (bg << 4) | fg, giving
 // full xterm fg+bg coloring. Lines that scroll off the top are kept in `term`
 // (the scrollback) for the history viewer.
-struct TLine { String t; std::vector<uint8_t> c; };
+struct TLine { std::vector<uint16_t> ch; std::vector<uint8_t> c; };
 static std::vector<TLine> term;            // committed scrollback (off-screen top)
 
-static char    gCh[TERM_ROWS][TERM_COLS];  // on-screen characters / glyph ids
+static void appendUtf8(String& out, uint16_t cp) {
+  if (cp < 0x80) out += char(cp);
+  else if (cp < 0x800) {
+    out += char(0xC0 | (cp >> 6)); out += char(0x80 | (cp & 0x3F));
+  } else {
+    out += char(0xE0 | (cp >> 12)); out += char(0x80 | ((cp >> 6) & 0x3F));
+    out += char(0x80 | (cp & 0x3F));
+  }
+}
+
+static String lineText(const TLine& line) {
+  String text;
+  text.reserve(line.ch.size());
+  for (uint16_t cp : line.ch) appendUtf8(text, cp);
+  return text;
+}
+
+static uint16_t gCh[TERM_ROWS][TERM_COLS]; // on-screen Unicode code points
 static uint8_t gCol[TERM_ROWS][TERM_COLS]; // on-screen packed colors
 static int     curR = 0, curC = 0;         // cursor row / column
 static int     savedR = 0, savedC = 0;     // ESC 7 / CSI s save slot
@@ -143,27 +162,6 @@ static bool    termDirty = true;
 static uint8_t curFg   = 7;                // current foreground palette index
 static uint8_t curBg   = 0;                // current background palette index
 static bool    curBold = false;
-
-// Powerline glyphs have no font coverage (Unicode PUA), so we decode them from
-// the UTF-8 stream into these sentinel bytes (< 0x20, never real text) and draw
-// them as vectors. The text byte holds the id; the color cell holds fg/bg.
-enum {
-  GL_RSOLID = 1,  // U+E0B0  right-pointing filled separator
-  GL_RTHIN  = 2,  // U+E0B1  right-pointing thin separator
-  GL_LSOLID = 3,  // U+E0B2  left-pointing filled separator
-  GL_LTHIN  = 4,  // U+E0B3  left-pointing thin separator
-  GL_BRANCH = 5,  // U+E0A0  git branch
-  GL_LINE   = 6,  // U+E0A1  line number (LN)
-  GL_LOCK   = 7,  // U+E0A2  padlock (read-only)
-};
-static char plGlyph(uint32_t cp) {
-  switch (cp) {
-    case 0xE0B0: return GL_RSOLID; case 0xE0B1: return GL_RTHIN;
-    case 0xE0B2: return GL_LSOLID; case 0xE0B3: return GL_LTHIN;
-    case 0xE0A0: return GL_BRANCH; case 0xE0A1: return GL_LINE;
-    case 0xE0A2: return GL_LOCK;   default:     return 0;
-  }
-}
 
 // 16-color xterm palette in RGB565 (0-7 normal, 8-15 bright).
 static const uint16_t kPal[16] = {
@@ -392,7 +390,7 @@ static TLine rowToLine(int r) {
   int last = -1;
   for (int c = TERM_COLS - 1; c >= 0; c--)
     if (gCh[r][c] != ' ' || (gCol[r][c] >> 4) != 0) { last = c; break; }
-  for (int c = 0; c <= last; c++) { ln.t += gCh[r][c]; ln.c.push_back(gCol[r][c]); }
+  for (int c = 0; c <= last; c++) { ln.ch.push_back(gCh[r][c]); ln.c.push_back(gCol[r][c]); }
   return ln;
 }
 
@@ -407,12 +405,11 @@ static void scrollUp() {
 
 static void newLine() { if (++curR >= TERM_ROWS) { scrollUp(); curR = TERM_ROWS - 1; } }
 
-static void putCell(char c) {
+static void putCell(uint16_t cp) {
   if (curC >= TERM_COLS) { curC = 0; newLine(); }   // wrap at right margin
-  gCh[curR][curC] = c; gCol[curR][curC] = effCell(); curC++;
+  gCh[curR][curC] = cp; gCol[curR][curC] = effCell(); curC++;
 }
-static void putChar(char c)  { putCell(c); }
-static void putGlyph(char id){ putCell(id); }
+static void putCodepoint(uint32_t cp) { putCell(TerminalUnicode::cellCodepoint(cp)); }
 
 // Apply an SGR ("ESC[ ... m") sequence: foreground, background and bold.
 static void applySgr(const String& params) {
@@ -493,6 +490,7 @@ static void termFeed(const String& data) {
   static String csi;
   static int      u8need = 0;
   static uint32_t u8cp   = 0;
+  static uint32_t u8min  = 0;
   for (size_t i = 0; i < data.length(); i++) {
     uint8_t c = (uint8_t)data[i];
 
@@ -525,16 +523,21 @@ static void termFeed(const String& data) {
     if (u8need > 0) {
       if ((c & 0xC0) == 0x80) {
         u8cp = (u8cp << 6) | (c & 0x3F);
-        if (--u8need == 0) { char g = plGlyph(u8cp); if (g) putGlyph(g); }
+        if (--u8need == 0) {
+          const bool valid = u8cp >= u8min && u8cp <= 0x10FFFF &&
+                             !(u8cp >= 0xD800 && u8cp <= 0xDFFF);
+          putCodepoint(valid ? u8cp : TerminalUnicode::Replacement);
+        }
         continue;
       }
+      putCodepoint(TerminalUnicode::Replacement);
       u8need = 0;
     }
     if (c >= 0xC0) {
-      if      ((c & 0xE0) == 0xC0) { u8cp = c & 0x1F; u8need = 1; }
-      else if ((c & 0xF0) == 0xE0) { u8cp = c & 0x0F; u8need = 2; }
-      else if ((c & 0xF8) == 0xF0) { u8cp = c & 0x07; u8need = 3; }
-      else                         { u8need = 0; }
+      if      (c >= 0xC2 && c <= 0xDF) { u8cp = c & 0x1F; u8need = 1; u8min = 0x80; }
+      else if (c >= 0xE0 && c <= 0xEF) { u8cp = c & 0x0F; u8need = 2; u8min = 0x800; }
+      else if (c >= 0xF0 && c <= 0xF4) { u8cp = c & 0x07; u8need = 3; u8min = 0x10000; }
+      else { u8need = 0; putCodepoint(TerminalUnicode::Replacement); }
       continue;
     }
 
@@ -545,47 +548,163 @@ static void termFeed(const String& data) {
       case '\b': if (curC > 0) curC--; break;
       case '\t': curC = min(TERM_COLS - 1, (curC / 8 + 1) * 8); break;
       case 0x07: break;                       // bell — ignored
-      default:   if (c >= 32 && c < 0x80) putChar((char)c);
+      default:   if (c >= 32 && c < 0x80) putCodepoint(c);
     }
   }
   termDirty = true;
 }
 
-// Draw a single Powerline glyph in a 6x9 cell at (x,y).
-static void drawGlyph(char id, int x, int y, uint16_t fg) {
-  switch (id) {
-    case GL_RSOLID: tft.fillTriangle(x, y, x, y + 8, x + 6, y + 4, fg); break;
-    case GL_LSOLID: tft.fillTriangle(x + 6, y, x + 6, y + 8, x, y + 4, fg); break;
-    case GL_RTHIN:  tft.drawLine(x, y, x + 6, y + 4, fg);
-                    tft.drawLine(x + 6, y + 4, x, y + 8, fg); break;
-    case GL_LTHIN:  tft.drawLine(x + 6, y, x, y + 4, fg);
-                    tft.drawLine(x, y + 4, x + 6, y + 8, fg); break;
-    case GL_BRANCH: tft.drawCircle(x + 2, y + 2, 1, fg);
-                    tft.drawFastVLine(x + 2, y + 3, 4, fg);
-                    tft.drawLine(x + 2, y + 5, x + 5, y + 2, fg);
-                    tft.fillCircle(x + 5, y + 2, 1, fg); break;
-    case GL_LOCK:   tft.drawRoundRect(x + 1, y + 1, 4, 4, 1, fg);
-                    tft.fillRect(x, y + 4, 6, 4, fg); break;
-    case GL_LINE:   tft.setTextColor(fg); tft.drawString("L", x, y); break;
+static void drawPowerline(uint16_t cp, int x, int y, uint16_t fg) {
+  switch (cp) {
+    case 0xE0B0: tft.fillTriangle(x, y, x, y + 8, x + 5, y + 4, fg); break;
+    case 0xE0B2: tft.fillTriangle(x + 5, y, x + 5, y + 8, x, y + 4, fg); break;
+    case 0xE0B1: tft.drawLine(x, y, x + 5, y + 4, fg);
+                 tft.drawLine(x + 5, y + 4, x, y + 8, fg); break;
+    case 0xE0B3: tft.drawLine(x + 5, y, x, y + 4, fg);
+                 tft.drawLine(x, y + 4, x + 5, y + 8, fg); break;
+    case 0xE0A0: tft.drawCircle(x + 1, y + 2, 1, fg);
+                 tft.drawFastVLine(x + 1, y + 3, 4, fg);
+                 tft.drawLine(x + 1, y + 5, x + 4, y + 2, fg);
+                 tft.fillCircle(x + 4, y + 2, 1, fg); break;
+    case 0xE0A2: tft.drawRoundRect(x + 1, y + 1, 4, 4, 1, fg);
+                 tft.fillRect(x, y + 4, 6, 4, fg); break;
+    case 0xE0A1: tft.setTextColor(fg); tft.drawString("L", x, y); break;
   }
 }
 
-// Draw one line: runs of identical fg/bg drawn together; Powerline glyph cells
-// drawn individually. Each cell is 6 wide, 9 tall (full fg+bg coloring).
+static void drawBoxArm(int direction, uint8_t weight, int x, int y, uint16_t fg) {
+  if (!weight) return;
+  const int cx = x + 2, cy = y + 4;
+  const bool vertical = direction == 0 || direction == 2;
+  int sx = cx, sy = cy, w = 1, h = 1;
+  if (direction == 0) { sy = y; h = 5; }
+  if (direction == 1) { sx = cx; w = 4; }
+  if (direction == 2) { sy = cy; h = 5; }
+  if (direction == 3) { sx = x; w = 3; }
+  if (weight == 3) {
+    if (vertical) {
+      tft.drawFastVLine(sx - 1, sy, h, fg); tft.drawFastVLine(sx + 1, sy, h, fg);
+    } else {
+      tft.drawFastHLine(sx, sy - 1, w, fg); tft.drawFastHLine(sx, sy + 1, w, fg);
+    }
+  } else if (weight == 2) {
+    if (vertical) tft.fillRect(sx, sy, 2, h, fg);
+    else          tft.fillRect(sx, sy, w, 2, fg);
+  } else {
+    if (vertical) tft.drawFastVLine(sx, sy, h, fg);
+    else          tft.drawFastHLine(sx, sy, w, fg);
+  }
+}
+
+static void drawBox(uint16_t cp, int x, int y, uint16_t fg) {
+  // Dashed lines have dedicated patterns; continuous variants use arm data.
+  if ((cp >= 0x2504 && cp <= 0x250B) || (cp >= 0x254C && cp <= 0x254F)) {
+    const bool vertical = (cp & 2) != 0;
+    const bool heavy = (cp & 1) != 0;
+    for (int p = 0; p < (vertical ? 9 : 6); p += 2) {
+      if (vertical) tft.fillRect(x + 2, y + p, heavy ? 2 : 1, 1, fg);
+      else          tft.fillRect(x + p, y + 4, 1, heavy ? 2 : 1, fg);
+    }
+    return;
+  }
+  if (cp >= 0x256D && cp <= 0x2570) { // rounded light corners
+    const bool right = cp == 0x256D || cp == 0x2570;
+    const bool down  = cp == 0x256D || cp == 0x256E;
+    const int cx = x + 2, cy = y + 4;
+    tft.drawFastHLine(right ? cx : x, cy, 3 + (right ? 1 : 0), fg);
+    tft.drawFastVLine(cx, down ? cy : y, down ? 5 : 5, fg);
+    tft.drawPixel(cx + (right ? -1 : 1), cy + (down ? -1 : 1), fg);
+    return;
+  }
+  if (cp >= 0x2571 && cp <= 0x2573) {
+    if (cp != 0x2572) tft.drawLine(x + 5, y, x, y + 8, fg);
+    if (cp != 0x2571) tft.drawLine(x, y, x + 5, y + 8, fg);
+    return;
+  }
+  const uint8_t arms = kBoxArms[cp - 0x2500];
+  for (int direction = 0; direction < 4; ++direction)
+    drawBoxArm(direction, (arms >> (direction * 2)) & 3, x, y, fg);
+}
+
+static void drawBlock(uint16_t cp, int x, int y, uint16_t fg) {
+  if (cp == 0x2580) { tft.fillRect(x, y, 6, 4, fg); return; }
+  if (cp >= 0x2581 && cp <= 0x2587) {
+    const int h = ((cp - 0x2580) * 9 + 4) / 8;
+    tft.fillRect(x, y + 9 - h, 6, h, fg); return;
+  }
+  if (cp == 0x2588) { tft.fillRect(x, y, 6, 9, fg); return; }
+  if (cp >= 0x2589 && cp <= 0x258F) {
+    const int eighths = 8 - (cp - 0x2588);
+    const int w = (eighths * 6 + 4) / 8;
+    tft.fillRect(x, y, w, 9, fg); return;
+  }
+  if (cp == 0x2590) { tft.fillRect(x + 3, y, 3, 9, fg); return; }
+  if (cp >= 0x2591 && cp <= 0x2593) {
+    const int level = cp - 0x2590;
+    for (int yy = 0; yy < 9; ++yy) for (int xx = 0; xx < 6; ++xx)
+      if (((xx * 3 + yy * 5) & 3) < level) tft.drawPixel(x + xx, y + yy, fg);
+    return;
+  }
+  if (cp == 0x2594) { tft.fillRect(x, y, 6, 1, fg); return; }
+  if (cp == 0x2595) { tft.fillRect(x + 5, y, 1, 9, fg); return; }
+  static const uint8_t quadrants[10] = {4, 8, 1, 13, 9, 7, 11, 2, 6, 14};
+  const uint8_t q = quadrants[cp - 0x2596];
+  if (q & 1) tft.fillRect(x,     y,     3, 4, fg);
+  if (q & 2) tft.fillRect(x + 3, y,     3, 4, fg);
+  if (q & 4) tft.fillRect(x,     y + 4, 3, 5, fg);
+  if (q & 8) tft.fillRect(x + 3, y + 4, 3, 5, fg);
+}
+
+static void drawFallback(uint16_t cp, int x, int y, uint16_t fg) {
+  if (TerminalUnicode::isPowerline(cp)) { drawPowerline(cp, x, y, fg); return; }
+  if (cp >= 0x2500 && cp <= 0x257F) { drawBox(cp, x, y, fg); return; }
+  if (cp >= 0x2580 && cp <= 0x259F) { drawBlock(cp, x, y, fg); return; }
+  if (cp >= 0x2800 && cp <= 0x28FF) {
+    const uint8_t dots = cp - 0x2800;
+    static const uint8_t bits[2][4] = {{0, 1, 2, 6}, {3, 4, 5, 7}};
+    for (int col = 0; col < 2; ++col) for (int row = 0; row < 4; ++row)
+      if (dots & (1U << bits[col][row])) tft.fillRect(x + 1 + col * 3, y + row * 2, 2, 1, fg);
+    return;
+  }
+  if (cp >= 0x2190 && cp <= 0x2193) {
+    if (cp == 0x2190 || cp == 0x2192) {
+      const bool right = cp == 0x2192;
+      tft.drawFastHLine(x + 1, y + 4, 5, fg);
+      tft.fillTriangle(right ? x + 5 : x, y + 4, right ? x + 2 : x + 3, y + 1,
+                       right ? x + 2 : x + 3, y + 7, fg);
+    } else {
+      const bool down = cp == 0x2193;
+      tft.drawFastVLine(x + 2, y + 1, 7, fg);
+      tft.fillTriangle(x + 2, down ? y + 8 : y, x, down ? y + 5 : y + 3,
+                       x + 5, down ? y + 5 : y + 3, fg);
+    }
+    return;
+  }
+  if (cp == 0x00B0) { tft.drawCircle(x + 2, y + 2, 2, fg); return; }
+  // Visible U+FFFD-style replacement for unsupported or malformed input.
+  tft.drawRect(x + 1, y + 1, 4, 7, fg);
+  tft.drawLine(x + 1, y + 1, x + 4, y + 7, fg);
+  tft.drawLine(x + 4, y + 1, x + 1, y + 7, fg);
+}
+
+// Draw one line: ASCII color runs use the embedded font. Unicode fallbacks are
+// drawn one cell at a time. Every cell is 6 wide and 9 tall with explicit bg.
 static void drawTLine(const TLine& ln, int y) {
-  int x = 4, i = 0, len = ln.t.length();
+  int x = 4, i = 0, len = ln.ch.size();
   while (i < len) {
     uint8_t packed = ln.c[i];
     uint16_t fg = kPal[packed & 0x0F];
     uint16_t bg = kPal[(packed >> 4) & 0x0F];
-    if ((uint8_t)ln.t[i] < 0x20) {            // Powerline glyph cell
+    if (ln.ch[i] > 0x7E) {
       tft.fillRect(x, y, 6, 9, bg);
-      drawGlyph(ln.t[i], x, y, fg);
+      drawFallback(ln.ch[i], x, y, fg);
       x += 6; i++;
       continue;
     }
     String run;
-    while (i < len && ln.c[i] == packed && (uint8_t)ln.t[i] >= 0x20) { run += ln.t[i]; i++; }
+    while (i < len && ln.c[i] == packed && ln.ch[i] >= 0x20 && ln.ch[i] <= 0x7E) {
+      run += char(ln.ch[i]); i++;
+    }
     tft.fillRect(x, y, 6 * run.length(), 9, bg);
     tft.setTextColor(fg, bg);
     tft.drawString(run, x, y);
@@ -1252,7 +1371,7 @@ static void runAi() {
   String ctx;
   if (aiFromTerminal) {
     int from = max(0, (int)term.size() - 18);
-    for (int i = from; i < (int)term.size(); i++) ctx += term[i].t + "\n";
+    for (int i = from; i < (int)term.size(); i++) ctx += lineText(term[i]) + "\n";
   }
   const bool useWeb = aiWebForQuestion;
   aiWebForQuestion = false; // Every new question must opt in again.
@@ -1376,8 +1495,6 @@ static void handleTerminal(const InputEvent& ev) {
     if (ctrlNextKey) {
       ctrlNextKey = false;
       termDirty = true;
-      // ASCII Ctrl+A..Ctrl+Z, case insensitive. For any other key,
-      // cancel the prefix without sending an unexpected shell character.
       if (c >= 'a' && c <= 'z') c = c - 'a' + 1;
       else if (c >= 'A' && c <= 'Z') c = c - 'A' + 1;
       else return;
@@ -1400,7 +1517,7 @@ static void handleSessionMenu(const InputEvent& ev) {
       case 0: aiFromTerminal = true; aiQuestion = ""; aiTranscript = "";
               aiTurns = 0; AI::resetConversation(); screen = Screen::AI_INPUT; break;
       case 1: if (aiLastCmd.length()) { gSsh.send(aiLastCmd); gSsh.send("\n"); } break;
-      case 2: ctrlNextKey = true; break;             // Ctrl + following letter
+      case 2: ctrlNextKey = true; break;
       case 3: gSsh.send("\t");   break;                // Tab
       case 4: gSsh.send("\x1b"); break;                // Esc
       case 5: gSsh.send("\x04"); break;                // Ctrl-D
