@@ -68,6 +68,7 @@ static uint32_t menuLastInput = 0;
 static bool menuScreensaver = false;
 static String lockEntry, lockMessage;
 static bool startupLockChecked = false;
+static bool lockSetup = false;
 
 static String bytesHex(const uint8_t* data, size_t len) {
   static const char hex[] = "0123456789abcdef";
@@ -91,14 +92,19 @@ static String pinDigest(const String& salt, const String& pin) {
 
 static void lockDevice() { lockEntry = ""; lockMessage = ""; screen = Screen::LOCK; dirty = true; }
 
-static void setDevicePin(const String& pin) {
-  if (pin.isEmpty()) { gConfig.lockSalt = ""; gConfig.lockHash = ""; Storage::save(); return; }
-  if (pin.length() < 4 || pin.length() > 8) { settingsImportMsg = "PIN must be 4-8 digits"; return; }
-  for (char c : pin) if (c < '0' || c > '9') { settingsImportMsg = "PIN must contain only digits"; return; }
+static bool setDevicePin(const String& pin) {
+  if (pin.isEmpty()) {
+    gConfig.lockSalt = ""; gConfig.lockHash = "";
+    settingsImportMsg = Storage::save() ? "Device PIN disabled" : "Could not save PIN";
+    return settingsImportMsg == "Device PIN disabled";
+  }
+  if (pin.length() < 4 || pin.length() > 8) { lockMessage = "PIN must be 4-8 digits"; return false; }
+  for (char c : pin) if (c < '0' || c > '9') { lockMessage = "Digits only"; return false; }
   uint8_t salt[16]; for (uint8_t& b : salt) b = (uint8_t)esp_random();
   gConfig.lockSalt = bytesHex(salt, sizeof(salt));
   gConfig.lockHash = pinDigest(gConfig.lockSalt, pin);
   settingsImportMsg = Storage::save() ? "Device PIN enabled" : "Could not save PIN";
+  return settingsImportMsg == "Device PIN enabled";
 }
 
 // T-Deck Plus battery voltage on GPIO4 via 2:1 resistor divider.
@@ -1187,8 +1193,9 @@ static void drawSettings() {
 }
 
 static void drawLock() {
-  tft.fillSprite(C_BG); header("NeoDeck locked");
-  fontUi(); tft.setTextColor(C_TEXT, C_BG); tft.drawCentreString("Enter PIN", 160, 30, 1);
+  tft.fillSprite(C_BG); header(lockSetup ? "Set device PIN" : "NeoDeck locked");
+  fontUi(); tft.setTextColor(C_TEXT, C_BG);
+  tft.drawCentreString(lockSetup ? "4-8 digits; empty disables" : "Enter PIN", 160, 30, 1);
   fontSmall(); tft.setTextColor(lockMessage.length() ? C_ERR : C_ACCENT, C_BG);
   tft.drawCentreString(lockMessage.length() ? lockMessage : dots(lockEntry.length()), 160, 52, 1);
   const char* keys[12] = {"1","2","3","4","5","6","7","8","9","DEL","0","OK"};
@@ -1747,13 +1754,20 @@ static void handleSettings(const InputEvent& ev) {
         settingsImportMsg = Storage::importFlashCredentials();
         needClear = true;
         break;
-      case 6: startEdit("PIN (empty disables)", "", true, Screen::SETTINGS, setDevicePin); break;
+      case 6: lockSetup = true; lockEntry = ""; lockMessage = ""; screen = Screen::LOCK; break;
     }
     dirty = true;
   }
 }
 
 static void submitPin() {
+  if (lockSetup) {
+    if (setDevicePin(lockEntry)) {
+      lockSetup = false; lockEntry = ""; lockMessage = "";
+      screen = Screen::SETTINGS; savedFlash = millis(); needClear = true; dirty = true;
+    } else dirty = true;
+    return;
+  }
   if (pinDigest(gConfig.lockSalt, lockEntry) == gConfig.lockHash) {
     lockEntry = ""; lockMessage = ""; screen = Screen::MENU; menuLastInput = millis(); dirty = true;
   } else { lockEntry = ""; lockMessage = "Incorrect PIN"; dirty = true; }
