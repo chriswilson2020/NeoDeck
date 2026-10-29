@@ -22,7 +22,7 @@ tumbling katakana rain.
 - 🖥️ **Real terminal** — a cursor-addressable VT100/xterm screen grid: CSI cursor
   positioning + erase, SGR **foreground and background** colors, UTF-8, OSC title
   swallowing, 8-column tabs. `vim`, `nano`, `htop`, `top`, `less` render in place.
-- ⌨️ **Session actions** — trackball click opens a menu: **Ctrl-C, Tab, Esc, Ctrl-D**,
+- ⌨️ **Session actions** — trackball click opens a menu: **Ctrl + next key, Tab, Esc, Ctrl-D**,
   **scrollback**, clear screen, *Ask AI*, *Paste last AI command*, disconnect.
 - 💾 **Stored connections** — named host/user/port + password *or* key profiles,
   persisted as JSON. Add / edit / delete on-device. **Peek** masked secrets.
@@ -146,6 +146,16 @@ c++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 | Terminal       | arrows = cursor keys, **click = Session menu** | everything typed goes to the shell |
 | Scrollback     | up/down pan history, left = back to live    | —                                |
 | Editors        | click = show/hide a masked field            | type, Enter = save, Backspace = delete |
+
+## Ctrl shortcuts in SSH
+
+The T-Deck Plus stock I2C keyboard sends NeoDeck a single character byte per keypress; it does not expose held Shift/Mic state. Until the keyboard-controller firmware supports those modifier events, NeoDeck provides a reliable Ctrl prefix in the SSH Session menu:
+
+1. While connected, click the trackball to open **Session**.
+2. Select **Ctrl + next key** (third entry).
+3. Press any letter `A` through `Z` to send its ASCII control byte to the remote SSH PTY. For example, `C` sends Ctrl-C, `D` sends Ctrl-D, `Z` sends Ctrl-Z, and `A` sends Ctrl-A. The prefix is automatically cleared after the next character; nonletters cancel it.
+
+Existing **Tab**, **Esc**, and **Ctrl-D** menu actions remain available. **Sym** and **Alt** mappings are unchanged. **Shift + Mic** is *not* implemented: it requires proven hardware modifier reporting or new keyboard-controller firmware.
 
 ## Architecture
 
