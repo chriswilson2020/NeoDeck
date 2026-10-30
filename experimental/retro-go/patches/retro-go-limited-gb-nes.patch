@@ -1,0 +1,99 @@
+From 57e1121cfd65911ec639c250fdef12b816384ab0 Mon Sep 17 00:00:00 2001
+From: chriswilson2020 <c.j.wilson@me.com>
+Date: Fri, 30 Oct 2026 17:44:30 +0100
+Subject: [PATCH] Add limited T-Deck Plus GB and NES launcher build
+
+---
+ .../retro-go/targets/t-deck-plus/config.h       |  3 ++-
+ components/retro-go/targets/t-deck-plus/env.py  |  2 +-
+ launcher/main/applications.c                    | 17 -----------------
+ launcher/main/main.c                            |  8 ++++++++
+ 4 files changed, 11 insertions(+), 19 deletions(-)
+
+diff --git a/components/retro-go/targets/t-deck-plus/config.h b/components/retro-go/targets/t-deck-plus/config.h
+index cb5ef6f..fa57b2b 100644
+--- a/components/retro-go/targets/t-deck-plus/config.h
++++ b/components/retro-go/targets/t-deck-plus/config.h
+@@ -1,5 +1,6 @@
+ // Target definition
+ #define RG_TARGET_NAME             "T-DECK-PLUS"
++#define RG_APP_FACTORY             "app0"
+ 
+ // Storage
+ #define RG_STORAGE_ROOT             "/sd"
+@@ -113,4 +114,4 @@
+ // External I2S DAC
+ #define RG_GPIO_SND_I2S_BCK         GPIO_NUM_7
+ #define RG_GPIO_SND_I2S_WS          GPIO_NUM_5
+-#define RG_GPIO_SND_I2S_DATA        GPIO_NUM_6
+\ No newline at end of file
++#define RG_GPIO_SND_I2S_DATA        GPIO_NUM_6
+diff --git a/components/retro-go/targets/t-deck-plus/env.py b/components/retro-go/targets/t-deck-plus/env.py
+index 86d8a8c..662fc4f 100644
+--- a/components/retro-go/targets/t-deck-plus/env.py
++++ b/components/retro-go/targets/t-deck-plus/env.py
+@@ -6,4 +6,4 @@ IDF_TARGET = "esp32s3"
+ # .fw file format, if supported by the device
+ FW_FORMAT = "none"
+ # Default apps to build when none is specified (comment to build all)
+-# DEFAULT_APPS = "launcher prboom-go"
++DEFAULT_APPS = "launcher retro-core"
+diff --git a/launcher/main/applications.c b/launcher/main/applications.c
+index 6af4768..c376127 100644
+--- a/launcher/main/applications.c
++++ b/launcher/main/applications.c
+@@ -690,25 +690,8 @@ static void application(const char *desc, const char *name, const char *exts, co
+ void applications_init(void)
+ {
+     application("Nintendo Entertainment System", "nes", "nes fc fds nsf zip", "retro-core", 16);
+-    application("Super Nintendo", "snes", "smc sfc zip", "retro-core", 0);
+     application("Nintendo Gameboy", "gb", "gb gbc zip", "retro-core", 0);
+     application("Nintendo Gameboy Color", "gbc", "gbc gb zip", "retro-core", 0);
+-    application("Nintendo Gameboy Advance", "gba", "gba zip", "gbsp", 0);
+-    application("Nintendo Game & Watch", "gw", "gw", "retro-core", 0);
+-    // application("Sega SG-1000", "sg1", "sms sg sg1", "retro-core", 0);
+-    application("Sega Master System", "sms", "sms sg zip", "retro-core", 0);
+-    application("Sega Game Gear", "gg", "gg zip", "retro-core", 0);
+-    application("Sega Mega Drive", "md", "md gen bin zip", "gwenesis", 0);
+-    application("Coleco ColecoVision", "col", "col rom zip", "retro-core", 0);
+-    application("NEC PC Engine", "pce", "pce zip", "retro-core", 0);
+-    application("Atari Lynx", "lnx", "lnx zip", "retro-core", 64);
+-    // application("Atari 2600", "a26", "a26 zip", "stella-go", 0);
+-    // application("Neo Geo Pocket Color", "ngp", "ngp ngc zip", "ngpocket-go", 0);
+-    application("DOOM", "doom", "wad zip", "prboom-go", 0);
+-    application("MSX", "msx", "rom mx1 mx2 dsk", "fmsx", 0);
+-
+-    // Special app to bootstrap native esp32 binaries from the SD card
+-    // application("Bootstrap", "apps", "bin elf", "bootstrap", 0);
+ 
+     if (!rg_system_get_app()->lowMemoryMode)
+         crc_cache_init();
+diff --git a/launcher/main/main.c b/launcher/main/main.c
+index c857b85..079d000 100644
+--- a/launcher/main/main.c
++++ b/launcher/main/main.c
+@@ -189,6 +189,13 @@ static rg_gui_event_t prebuild_cache_cb(rg_gui_option_t *option, rg_gui_event_t
+     return RG_DIALOG_VOID;
+ }
+ 
++static rg_gui_event_t system_launcher_cb(rg_gui_option_t *option, rg_gui_event_t event)
++{
++    if (event == RG_DIALOG_ENTER)
++        rg_system_switch_app(RG_APP_FACTORY, NULL, NULL, 0);
++    return RG_DIALOG_VOID;
++}
++
+ static void retro_loop(void)
+ {
+     tab_t *tab = NULL;
+@@ -431,6 +438,7 @@ static void options_handler(rg_gui_option_t *dest)
+ 
+ static void about_handler(rg_gui_option_t *dest)
+ {
++    *dest++ = (rg_gui_option_t){0, "Return to system Launcher", NULL, RG_DIALOG_FLAG_NORMAL, &system_launcher_cb};
+     *dest++ = (rg_gui_option_t){0, _("Build CRC cache"), NULL, RG_DIALOG_FLAG_NORMAL, &prebuild_cache_cb};
+     #if defined(RG_ENABLE_NETWORKING) && RG_UPDATER_ENABLE
+     *dest++ = (rg_gui_option_t){0, _("Check for updates"), NULL, RG_DIALOG_FLAG_NORMAL, &updater_cb};
+-- 
+2.54.0 (Apple Git-157)
+
