@@ -14,6 +14,8 @@
 #include "fsx.h"
 #include "touch.h"
 #include <mbedtls/sha256.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
 #include <esp_system.h>
 #include "matrix_glyphs.h"
 #include "usb_storage.h"
@@ -63,6 +65,7 @@ static void rainDraw(bool dim);           // render the rain into the framebuffe
 static int menuSel = 0, listSel = 0, editSel = 0, setSel = 0, sessSel = 0, hkSel = 0;
 static uint32_t savedFlash = 0;   // timestamp of last settings save (for toast)
 static String settingsImportMsg;
+static constexpr int SETTINGS_ROWS = 8;
 static constexpr uint32_t MENU_IDLE_MS = 15000;
 static uint32_t menuLastInput = 0;
 static uint32_t terminalLastInput = 0;
@@ -1161,11 +1164,12 @@ static void drawSettings() {
     "Save & reconnect WiFi",
     "Import WiFi/API from flash",
     "Device PIN: " + String(gConfig.lockHash.length() ? "enabled" : "disabled"),
+    "Return to system Launcher",
   };
-  static const uint16_t ic[] = {C_BLUE, C_BLUE, C_PURPLE, C_CYAN, C_ACCENT, C_ACCENT, C_WARN};
+  static const uint16_t ic[] = {C_BLUE, C_BLUE, C_PURPLE, C_CYAN, C_ACCENT, C_ACCENT, C_WARN, C_WARN};
   const int y0 = HDR_H + 6, rh = 30, ch = rh - 5;
   const int off = max(0, setSel - 4);
-  for (int i = off; i < 7 && i < off + 5; i++) {
+  for (int i = off; i < SETTINGS_ROWS && i < off + 5; i++) {
     int y = y0 + (i - off) * rh;
     bool s = (i == setSel);
     tft.fillRoundRect(8, y, 304, ch, 5, s ? C_PANEL2 : C_PANEL);
@@ -1770,8 +1774,8 @@ static void handleAiResult(const InputEvent& ev) {
 }
 
 static void handleSettings(const InputEvent& ev) {
-  if (ev.type == EvType::UP)    { setSel = (setSel + 6) % 7; dirty = needClear = true; }
-  if (ev.type == EvType::DOWN)  { setSel = (setSel + 1) % 7; dirty = needClear = true; }
+  if (ev.type == EvType::UP)    { setSel = (setSel + SETTINGS_ROWS - 1) % SETTINGS_ROWS; dirty = needClear = true; }
+  if (ev.type == EvType::DOWN)  { setSel = (setSel + 1) % SETTINGS_ROWS; dirty = needClear = true; }
   if (ev.type == EvType::RIGHT) { setReveal = !setReveal;    dirty = true; }   // peek secrets
   if (ev.type == EvType::LEFT || ev.ch == '`') { setReveal = false; screen = Screen::MENU; dirty = true; }
   if (ev.type == EvType::SELECT || ev.ch == '\r') {
@@ -1787,6 +1791,21 @@ static void handleSettings(const InputEvent& ev) {
         needClear = true;
         break;
       case 6: lockSetup = true; lockEntry = ""; lockMessage = ""; screen = Screen::LOCK; break;
+      case 7: {
+        const esp_partition_t* launcher = esp_partition_find_first(
+          ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "app0");
+        if (!launcher) {
+          settingsImportMsg = "System Launcher is not installed";
+          break;
+        }
+        if (esp_ota_set_boot_partition(launcher) != ESP_OK) {
+          settingsImportMsg = "Could not select system Launcher";
+          break;
+        }
+        delay(100);
+        esp_restart();
+        break;
+      }
     }
     dirty = true;
   }
