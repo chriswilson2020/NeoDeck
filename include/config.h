@@ -23,9 +23,9 @@
 #define BOARD_TOUCH_ADDR  0x5D
 #define BOARD_TOUCH_ADDR2 0x14
 // If taps land mirrored/rotated, flip these (set to 1) — needs on-hardware tune.
-#define TOUCH_SWAP_XY 0
+#define TOUCH_SWAP_XY 1
 #define TOUCH_INV_X   0
-#define TOUCH_INV_Y   0
+#define TOUCH_INV_Y   1
 
 // Trackball (active-low quadrature-style pulse pins + click)
 #define TB_UP     3

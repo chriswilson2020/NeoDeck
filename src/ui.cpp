@@ -69,6 +69,8 @@ static bool menuScreensaver = false;
 static String lockEntry, lockMessage;
 static bool startupLockChecked = false;
 static bool lockSetup = false;
+static bool lockFromScreensaver = false;
+static uint32_t lockLastInput = 0;
 
 static String bytesHex(const uint8_t* data, size_t len) {
   static const char hex[] = "0123456789abcdef";
@@ -90,7 +92,14 @@ static String pinDigest(const String& salt, const String& pin) {
   return bytesHex(digest, sizeof(digest));
 }
 
-static void lockDevice() { lockEntry = ""; lockMessage = ""; screen = Screen::LOCK; dirty = true; }
+static void lockDevice(bool fromScreensaver = false) {
+  lockEntry = "";
+  lockMessage = "";
+  lockFromScreensaver = fromScreensaver;
+  lockLastInput = millis();
+  screen = Screen::LOCK;
+  dirty = true;
+}
 
 static bool setDevicePin(const String& pin) {
   if (pin.isEmpty()) {
@@ -1769,11 +1778,13 @@ static void submitPin() {
     return;
   }
   if (pinDigest(gConfig.lockSalt, lockEntry) == gConfig.lockHash) {
-    lockEntry = ""; lockMessage = ""; screen = Screen::MENU; menuLastInput = millis(); dirty = true;
+    lockEntry = ""; lockMessage = ""; lockFromScreensaver = false;
+    screen = Screen::MENU; menuLastInput = millis(); dirty = true;
   } else { lockEntry = ""; lockMessage = "Incorrect PIN"; dirty = true; }
 }
 
 static void handleLock(const InputEvent& ev) {
+  lockLastInput = millis();
   if (ev.type != EvType::CHAR) return;
   if (ev.ch == '\r') submitPin();
   else if (ev.ch == 0x08) { if (lockEntry.length()) lockEntry.remove(lockEntry.length() - 1); lockMessage = ""; dirty = true; }
@@ -1842,7 +1853,8 @@ void handle(const InputEvent& ev) {
     menuLastInput = millis();
     if (menuScreensaver) {
       menuScreensaver = false;
-      dirty = true;
+      if (gConfig.lockHash.length()) lockDevice(true);
+      else dirty = true;
       return; // Wake only: don't accidentally select a menu item.
     }
   }
@@ -1871,9 +1883,12 @@ void handle(const InputEvent& ev) {
 // ---------------------------------------------------------------------------
 void touch(int x, int y) {
   if (screen == Screen::LOCK) {
+    lockLastInput = millis();
     if (y >= 72 && y < 232) {
       int col = (x - 20) / 100, row = (y - 72) / 40;
-      if (x >= 20 && col >= 0 && col < 3 && row >= 0 && row < 4) {
+      int keyX = x - (20 + col * 100), keyY = y - (72 + row * 40);
+      if (x >= 20 && col >= 0 && col < 3 && row >= 0 && row < 4 &&
+          keyX >= 0 && keyX < 80 && keyY >= 0 && keyY < 32) {
         int i = row * 3 + col;
         const char* keys[12] = {"1","2","3","4","5","6","7","8","9","D","0","O"};
         char key = keys[i][0];
@@ -1888,7 +1903,8 @@ void touch(int x, int y) {
     menuLastInput = millis();
     if (menuScreensaver) {
       menuScreensaver = false;
-      dirty = true;
+      if (gConfig.lockHash.length()) lockDevice(true);
+      else dirty = true;
       return; // First touch only restores the menu.
     }
   }
@@ -1987,11 +2003,20 @@ void tick() {
   // Animate the menu's rain background at ~14 fps.
   if (screen == Screen::MENU) {
     if (!menuScreensaver && millis() - menuLastInput >= MENU_IDLE_MS) {
-      if (gConfig.lockHash.length()) lockDevice();
-      else { menuScreensaver = true; dirty = true; }
+      menuScreensaver = true;
+      dirty = true;
     }
     static uint32_t lastRain = 0;
     if (millis() - lastRain > 70) { lastRain = millis(); dirty = true; }
+  }
+  if (screen == Screen::LOCK && lockFromScreensaver &&
+      millis() - lockLastInput >= MENU_IDLE_MS) {
+    lockEntry = "";
+    lockMessage = "";
+    lockFromScreensaver = false;
+    screen = Screen::MENU;
+    menuScreensaver = true;
+    dirty = true;
   }
   // Blink the terminal cursor (~2 Hz) when the shell is live and not scrolling.
   if (screen == Screen::TERMINAL && !termScrollMode &&
