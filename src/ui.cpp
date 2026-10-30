@@ -65,11 +65,12 @@ static uint32_t savedFlash = 0;   // timestamp of last settings save (for toast)
 static String settingsImportMsg;
 static constexpr uint32_t MENU_IDLE_MS = 15000;
 static uint32_t menuLastInput = 0;
+static uint32_t terminalLastInput = 0;
 static bool menuScreensaver = false;
+static Screen screensaverReturn = Screen::MENU;
 static String lockEntry, lockMessage;
 static bool startupLockChecked = false;
 static bool lockSetup = false;
-static bool lockFromScreensaver = false;
 static uint32_t lockLastInput = 0;
 
 static String bytesHex(const uint8_t* data, size_t len) {
@@ -95,9 +96,29 @@ static String pinDigest(const String& salt, const String& pin) {
 static void lockDevice(bool fromScreensaver = false) {
   lockEntry = "";
   lockMessage = "";
-  lockFromScreensaver = fromScreensaver;
+  (void)fromScreensaver;
   lockLastInput = millis();
   screen = Screen::LOCK;
+  dirty = true;
+}
+
+static void showScreensaver(Screen returnTo) {
+  screensaverReturn = returnTo;
+  screen = Screen::MENU;
+  menuScreensaver = true;
+  dirty = true;
+}
+
+static void restoreFromScreensaver() {
+  Screen returnTo = screensaverReturn;
+  screensaverReturn = Screen::MENU;
+  screen = returnTo;
+  menuScreensaver = false;
+  if (returnTo == Screen::TERMINAL) {
+    terminalLastInput = millis();
+  } else {
+    menuLastInput = millis();
+  }
   dirty = true;
 }
 
@@ -1497,7 +1518,9 @@ void render() {
   // The idle timer applies only on the home menu, and starts afresh on return.
   if (screen == Screen::MENU && lastDrawn != Screen::MENU) {
     menuLastInput = millis();
-    menuScreensaver = false;
+  }
+  if (screen == Screen::TERMINAL && lastDrawn != Screen::TERMINAL) {
+    terminalLastInput = millis();
   }
   // A frame is "fresh" (warrants a full body wipe) only when the screen changed
   // or something explicitly asked for a clear; otherwise we repaint in place.
@@ -1778,14 +1801,14 @@ static void submitPin() {
     return;
   }
   if (pinDigest(gConfig.lockSalt, lockEntry) == gConfig.lockHash) {
-    lockEntry = ""; lockMessage = ""; lockFromScreensaver = false;
-    screen = Screen::MENU; menuLastInput = millis(); dirty = true;
+    lockEntry = ""; lockMessage = "";
+    restoreFromScreensaver();
   } else { lockEntry = ""; lockMessage = "Incorrect PIN"; dirty = true; }
 }
 
 static void handleLock(const InputEvent& ev) {
-  lockLastInput = millis();
   if (ev.type != EvType::CHAR) return;
+  lockLastInput = millis();
   if (ev.ch == '\r') submitPin();
   else if (ev.ch == 0x08) { if (lockEntry.length()) lockEntry.remove(lockEntry.length() - 1); lockMessage = ""; dirty = true; }
   else if (ev.ch >= '0' && ev.ch <= '9' && lockEntry.length() < 8) { lockEntry += ev.ch; lockMessage = ""; dirty = true; }
@@ -1852,12 +1875,12 @@ void handle(const InputEvent& ev) {
   if (screen == Screen::MENU) {
     menuLastInput = millis();
     if (menuScreensaver) {
-      menuScreensaver = false;
       if (gConfig.lockHash.length()) lockDevice(true);
-      else dirty = true;
+      else restoreFromScreensaver();
       return; // Wake only: don't accidentally select a menu item.
     }
   }
+  if (screen == Screen::TERMINAL) terminalLastInput = millis();
   switch (screen) {
     case Screen::SPLASH:       break;
     case Screen::MENU:         handleMenu(ev); break;
@@ -1883,7 +1906,6 @@ void handle(const InputEvent& ev) {
 // ---------------------------------------------------------------------------
 void touch(int x, int y) {
   if (screen == Screen::LOCK) {
-    lockLastInput = millis();
     if (y >= 72 && y < 232) {
       int col = (x - 20) / 100, row = (y - 72) / 40;
       int keyX = x - (20 + col * 100), keyY = y - (72 + row * 40);
@@ -1902,9 +1924,8 @@ void touch(int x, int y) {
   if (screen == Screen::MENU) {
     menuLastInput = millis();
     if (menuScreensaver) {
-      menuScreensaver = false;
       if (gConfig.lockHash.length()) lockDevice(true);
-      else dirty = true;
+      else restoreFromScreensaver();
       return; // First touch only restores the menu.
     }
   }
@@ -2003,20 +2024,21 @@ void tick() {
   // Animate the menu's rain background at ~14 fps.
   if (screen == Screen::MENU) {
     if (!menuScreensaver && millis() - menuLastInput >= MENU_IDLE_MS) {
-      menuScreensaver = true;
-      dirty = true;
+      showScreensaver(Screen::MENU);
     }
     static uint32_t lastRain = 0;
     if (millis() - lastRain > 70) { lastRain = millis(); dirty = true; }
   }
-  if (screen == Screen::LOCK && lockFromScreensaver &&
+  if (screen == Screen::LOCK && !lockSetup &&
       millis() - lockLastInput >= MENU_IDLE_MS) {
     lockEntry = "";
     lockMessage = "";
-    lockFromScreensaver = false;
-    screen = Screen::MENU;
-    menuScreensaver = true;
-    dirty = true;
+    showScreensaver(screensaverReturn);
+  }
+  if (screen == Screen::TERMINAL &&
+      millis() - terminalLastInput >= MENU_IDLE_MS) {
+    showScreensaver(Screen::TERMINAL);
+    termDirty = true;
   }
   // Blink the terminal cursor (~2 Hz) when the shell is live and not scrolling.
   if (screen == Screen::TERMINAL && !termScrollMode &&

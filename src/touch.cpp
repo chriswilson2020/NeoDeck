@@ -15,7 +15,7 @@ static String   busRep_;              // I2C scan result captured at begin()
 
 // GT911 register map (subset)
 static const uint16_t REG_STATUS = 0x814E;   // bit7=ready, low nibble=#points
-static const uint16_t REG_POINT1 = 0x8150;   // [id,xl,xh,yl,yh,sl,sh,res]
+static const uint16_t REG_POINT1 = 0x814F;   // [id,xl,xh,yl,yh,sl,sh,res]
 
 static bool rd(uint16_t reg, uint8_t* buf, uint8_t len) {
   Wire.beginTransmission(addr_);

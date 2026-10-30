@@ -48,7 +48,7 @@
 //  Application
 // =============================================================================
 #define APP_NAME        "NeoDeck"
-#define APP_VERSION     "0.9.0"
+#define APP_VERSION     "0.10.0"
 #define CFG_PATH        "/config.json"
 #define MAX_SCROLLBACK  200     // terminal lines kept in PSRAM
 #define TERM_COLS       52      // chars per terminal row (6px font on 320px)
